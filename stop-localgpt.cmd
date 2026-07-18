@@ -5,7 +5,7 @@ cd /d "%~dp0"
 set "LOCALGPT_ROOT=%~dp0"
 set "LOCALGPT_PID_FILE=%~dp0.localgpt.pid"
 if not exist "%LOCALGPT_PID_FILE%" (
-  echo LocalGPT is not running or its PID file is missing.
+  echo MyGPT is not running or its PID file is missing.
   exit /b 0
 )
 
@@ -23,7 +23,7 @@ set "LOCALGPT_STOP_CODE=%ERRORLEVEL%"
 del /q "%LOCALGPT_PID_FILE%" >nul 2>&1
 
 if "%LOCALGPT_STOP_CODE%"=="0" (
-  echo LocalGPT stopped. PID: %LOCALGPT_PID%
+  echo MyGPT stopped. PID: %LOCALGPT_PID%
 ) else if "%LOCALGPT_STOP_CODE%"=="2" (
   echo Process %LOCALGPT_PID% is already gone. Removed the PID file.
 ) else if "%LOCALGPT_STOP_CODE%"=="3" (

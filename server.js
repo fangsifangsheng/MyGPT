@@ -11,6 +11,7 @@ import multer from "multer";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(process.env.LOCALGPT_DATA_DIR || path.join(__dirname, "chats"));
+const USERS_ROOT = path.join(DATA_ROOT, "users");
 const PORT = Number(process.env.LOCALGPT_PORT || 4317);
 const LAN_MODE = process.argv.includes("--lan") || process.env.LOCALGPT_LAN === "1";
 const HOST = process.env.LOCALGPT_HOST || (LAN_MODE ? "0.0.0.0" : "127.0.0.1");
@@ -27,7 +28,21 @@ const CODEX_JS = process.platform === "win32"
 const CODEX_COMMAND = process.platform === "win32" && fsSync.existsSync(CODEX_JS) ? process.execPath : "codex";
 const CODEX_PREFIX_ARGS = process.platform === "win32" && CODEX_COMMAND === process.execPath ? [CODEX_JS] : [];
 
-await fs.mkdir(DATA_ROOT, { recursive: true });
+await fs.mkdir(USERS_ROOT, { recursive: true });
+
+async function migrateLegacyChats() {
+  const legacyRoleRoot = path.join(USERS_ROOT, "default");
+  await fs.mkdir(legacyRoleRoot, { recursive: true });
+  const entries = await fs.readdir(DATA_ROOT, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === "users" || !/^chat-[a-zA-Z0-9_-]+$/.test(entry.name)) continue;
+    const source = path.join(DATA_ROOT, entry.name);
+    const destination = path.join(legacyRoleRoot, entry.name);
+    try { await fs.access(destination); } catch { await fs.rename(source, destination); }
+  }
+}
+
+await migrateLegacyChats();
 
 const app = express();
 app.disable("x-powered-by");
@@ -49,62 +64,115 @@ function parseCookies(header = "") {
   );
 }
 
-function makeAuthToken() {
+function normalizeRole(value) {
+  const role = String(value || "")
+    .normalize("NFKC")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .replace(/\s+/g, "_")
+    .toLowerCase()
+    .slice(0, 64);
+  if (!role || role === "." || role === "..") throw new Error("请输入有效的登录用户名");
+  return role;
+}
+
+function encodeRole(role) {
+  return Buffer.from(role, "utf8").toString("base64url");
+}
+
+function decodeRole(value) {
+  try { return normalizeRole(Buffer.from(value, "base64url").toString("utf8")); } catch { return ""; }
+}
+
+function makeAuthToken(role) {
   const expires = Date.now() + 30 * 24 * 60 * 60 * 1000;
-  const signature = crypto.createHmac("sha256", authSecret).update(String(expires)).digest("base64url");
-  return `${expires}.${signature}`;
+  const encodedRole = encodeRole(role);
+  const signature = crypto.createHmac("sha256", authSecret).update(`${expires}.${encodedRole}`).digest("base64url");
+  return `${expires}.${encodedRole}.${signature}`;
+}
+
+function authSession(req) {
+  const token = parseCookies(req.headers.cookie).localgpt_auth;
+  if (!token) return null;
+  const [expires, encodedRole, signature] = token.split(".");
+  const role = decodeRole(encodedRole || "");
+  if (!expires || !encodedRole || !signature || !role || Number(expires) < Date.now()) return null;
+  const expected = crypto.createHmac("sha256", authSecret).update(`${expires}.${encodedRole}`).digest("base64url");
+  if (!safeEqual(signature, expected)) return null;
+  return { role, expires: Number(expires) };
 }
 
 function hasValidAuth(req) {
-  if (!accessPassword) return true;
-  const token = parseCookies(req.headers.cookie).localgpt_auth;
-  if (!token) return false;
-  const [expires, signature] = token.split(".");
-  if (!expires || !signature || Number(expires) < Date.now()) return false;
-  const expected = crypto.createHmac("sha256", authSecret).update(expires).digest("base64url");
-  return safeEqual(signature, expected);
+  return Boolean(authSession(req));
+}
+
+function requestRole(req) {
+  const session = authSession(req);
+  if (!session) throw new Error("需要先登录用户名");
+  return session.role;
 }
 
 function requireAuth(req, res, next) {
   if (hasValidAuth(req)) return next();
-  res.status(401).json({ error: "需要访问密码" });
+  res.status(401).json({ error: "需要先登录用户名" });
 }
 
 app.get("/api/auth/status", (req, res) => {
-  res.json({ required: Boolean(accessPassword), authenticated: hasValidAuth(req), lanMode: LAN_MODE });
+  const session = authSession(req);
+  res.json({
+    required: true,
+    passwordRequired: Boolean(accessPassword),
+    authenticated: Boolean(session),
+    role: session?.role || "",
+    lanMode: LAN_MODE,
+  });
 });
 
 app.post("/api/auth/login", (req, res) => {
-  if (!accessPassword || safeEqual(req.body.password || "", accessPassword)) {
-    res.setHeader(
-      "Set-Cookie",
-      `localgpt_auth=${makeAuthToken()}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 60 * 60}`,
-    );
-    return res.json({ ok: true });
+  let role;
+  try { role = normalizeRole(req.body.role); } catch (error) { return res.status(400).json({ error: error.message }); }
+  if (accessPassword && !safeEqual(req.body.password || "", accessPassword)) {
+    return res.status(401).json({ error: "密码不正确" });
   }
-  res.status(401).json({ error: "密码不正确" });
+  res.setHeader(
+    "Set-Cookie",
+    `localgpt_auth=${makeAuthToken(role)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 60 * 60}`,
+  );
+  return res.json({ ok: true, role });
+});
+
+app.post("/api/auth/logout", (req, res) => {
+  res.setHeader("Set-Cookie", "localgpt_auth=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0");
+  res.json({ ok: true });
 });
 
 app.use("/api", requireAuth);
 
-function chatDir(id) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("无效的会话 ID");
-  const resolved = path.resolve(DATA_ROOT, id);
-  if (path.dirname(resolved) !== DATA_ROOT) throw new Error("路径超出数据目录");
+function roleDir(role) {
+  const normalized = normalizeRole(role);
+  const resolved = path.resolve(USERS_ROOT, normalized);
+  if (path.dirname(resolved) !== USERS_ROOT) throw new Error("角色路径超出数据目录");
   return resolved;
 }
 
-function metaPath(id) {
-  return path.join(chatDir(id), ".localgpt", "chat.json");
+function chatDir(id, role) {
+  if (!/^[a-zA-Z0-9_-]+$/.test(id)) throw new Error("无效的会话 ID");
+  const resolved = path.resolve(roleDir(role), id);
+  if (path.dirname(resolved) !== roleDir(role)) throw new Error("路径超出数据目录");
+  return resolved;
 }
 
-async function readMeta(id) {
-  return JSON.parse(await fs.readFile(metaPath(id), "utf8"));
+function metaPath(id, role) {
+  return path.join(chatDir(id, role), ".localgpt", "chat.json");
+}
+
+async function readMeta(id, role) {
+  return JSON.parse(await fs.readFile(metaPath(id, role), "utf8"));
 }
 
 async function writeMeta(meta) {
   meta.updatedAt = new Date().toISOString();
-  const destination = metaPath(meta.id);
+  const destination = metaPath(meta.id, meta.userRole);
   await fs.mkdir(path.dirname(destination), { recursive: true });
   await fs.writeFile(destination, JSON.stringify(meta, null, 2), "utf8");
 }
@@ -124,12 +192,16 @@ function message(role, content, extra = {}) {
   };
 }
 
-async function listChats() {
-  const entries = await fs.readdir(DATA_ROOT, { withFileTypes: true });
+function runKey(role, id) { return `${normalizeRole(role)}:${id}`; }
+
+async function listChats(role) {
+  const root = roleDir(role);
+  await fs.mkdir(root, { recursive: true });
+  const entries = await fs.readdir(root, { withFileTypes: true });
   const chats = await Promise.all(
     entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
       try {
-        const meta = await readMeta(entry.name);
+        const meta = await readMeta(entry.name, role);
         return {
           id: meta.id,
           title: meta.title,
@@ -138,7 +210,7 @@ async function listChats() {
           createdAt: meta.createdAt,
           updatedAt: meta.updatedAt,
           messageCount: meta.messages?.length || 0,
-          running: activeRuns.has(meta.id),
+          running: activeRuns.has(runKey(role, meta.id)),
         };
       } catch {
         return null;
@@ -161,7 +233,7 @@ function readCodexDefaults() {
   return { model: get("model") || "", reasoningEffort: get("model_reasoning_effort") || "medium" };
 }
 
-const codexDefaults = readCodexDefaults();
+const codexDefaults = { ...readCodexDefaults(), reasoningEffort: "medium" };
 const suggestedModels = [...new Set([
   codexDefaults.model,
   "gpt-5.6-sol",
@@ -172,6 +244,7 @@ const suggestedModels = [...new Set([
 app.get("/api/config", (req, res) => {
   res.json({
     dataRoot: DATA_ROOT,
+    userRole: requestRole(req),
     host: HOST,
     port: PORT,
     lanMode: LAN_MODE,
@@ -184,18 +257,20 @@ app.get("/api/config", (req, res) => {
 
 app.get("/api/chats", async (req, res, next) => {
   try {
-    res.json(await listChats());
+    res.json(await listChats(requestRole(req)));
   } catch (error) { next(error); }
 });
 
 app.post("/api/chats", async (req, res, next) => {
   try {
+    const userRole = requestRole(req);
     const now = new Date();
     const stamp = now.toISOString().replace(/[-:]/g, "").replace(/\..+/, "").replace("T", "-");
     const id = `chat-${stamp}-${crypto.randomBytes(2).toString("hex")}`;
     const meta = {
       version: 1,
       id,
+      userRole,
       title: cleanTitle(req.body.title),
       model: String(req.body.model || codexDefaults.model || ""),
       reasoningEffort: String(req.body.reasoningEffort || codexDefaults.reasoningEffort || "medium"),
@@ -204,7 +279,7 @@ app.post("/api/chats", async (req, res, next) => {
       updatedAt: now.toISOString(),
       messages: [],
     };
-    await fs.mkdir(chatDir(id), { recursive: true });
+    await fs.mkdir(chatDir(id, userRole), { recursive: true });
     await writeMeta(meta);
     res.status(201).json(meta);
   } catch (error) { next(error); }
@@ -212,18 +287,20 @@ app.post("/api/chats", async (req, res, next) => {
 
 app.get("/api/chats/:id", async (req, res, next) => {
   try {
-    const meta = await readMeta(req.params.id);
-    res.json({ ...meta, running: activeRuns.has(meta.id) });
+    const userRole = requestRole(req);
+    const meta = await readMeta(req.params.id, userRole);
+    res.json({ ...meta, running: activeRuns.has(runKey(userRole, meta.id)) });
   } catch (error) { next(error); }
 });
 
 app.patch("/api/chats/:id", async (req, res, next) => {
   try {
-    const meta = await readMeta(req.params.id);
+    const userRole = requestRole(req);
+    const meta = await readMeta(req.params.id, userRole);
     if (req.body.title !== undefined) meta.title = cleanTitle(req.body.title);
     if (req.body.model !== undefined) meta.model = String(req.body.model).trim();
     if (req.body.reasoningEffort !== undefined) meta.reasoningEffort = normalizeEffort(req.body.reasoningEffort);
-    if (req.body.resetThread === true && !activeRuns.has(meta.id)) meta.codexThreadId = null;
+    if (req.body.resetThread === true && !activeRuns.has(runKey(userRole, meta.id))) meta.codexThreadId = null;
     await writeMeta(meta);
     res.json(meta);
   } catch (error) { next(error); }
@@ -232,9 +309,10 @@ app.patch("/api/chats/:id", async (req, res, next) => {
 app.delete("/api/chats/:id", async (req, res, next) => {
   try {
     const id = req.params.id;
-    if (activeRuns.has(id)) return res.status(409).json({ error: "请先停止这个会话中的任务" });
-    const directory = chatDir(id);
-    await readMeta(id);
+    const userRole = requestRole(req);
+    if (activeRuns.has(runKey(userRole, id))) return res.status(409).json({ error: "请先停止这个会话中的任务" });
+    const directory = chatDir(id, userRole);
+    await readMeta(id, userRole);
     await fs.rm(directory, { recursive: true, force: false });
     res.json({ ok: true });
   } catch (error) { next(error); }
@@ -259,7 +337,7 @@ async function walkFiles(root, current = root, results = []) {
 
 app.get("/api/chats/:id/files", async (req, res, next) => {
   try {
-    res.json(await walkFiles(chatDir(req.params.id)));
+    res.json(await walkFiles(chatDir(req.params.id, requestRole(req))));
   } catch (error) { next(error); }
 });
 
@@ -289,8 +367,9 @@ async function availablePath(directory, filename) {
 
 app.post("/api/chats/:id/files", upload.array("files", 30), async (req, res, next) => {
   try {
-    const directory = chatDir(req.params.id);
-    await readMeta(req.params.id);
+    const userRole = requestRole(req);
+    const directory = chatDir(req.params.id, userRole);
+    await readMeta(req.params.id, userRole);
     const saved = [];
     for (const file of req.files || []) {
       const destination = await availablePath(directory, safeFileName(file.originalname));
@@ -301,8 +380,8 @@ app.post("/api/chats/:id/files", upload.array("files", 30), async (req, res, nex
   } catch (error) { next(error); }
 });
 
-function resolveChatFile(id, relative) {
-  const root = chatDir(id);
+function resolveChatFile(id, role, relative) {
+  const root = chatDir(id, role);
   const resolved = path.resolve(root, String(relative || ""));
   if (resolved === root || !resolved.startsWith(root + path.sep) || resolved.startsWith(path.join(root, ".localgpt"))) {
     throw new Error("无效的文件路径");
@@ -321,8 +400,9 @@ async function assertRealChatFile(root, file) {
 
 app.get("/api/chats/:id/file", async (req, res, next) => {
   try {
-    const root = chatDir(req.params.id);
-    const file = await assertRealChatFile(root, resolveChatFile(req.params.id, req.query.path));
+    const role = requestRole(req);
+    const root = chatDir(req.params.id, role);
+    const file = await assertRealChatFile(root, resolveChatFile(req.params.id, role, req.query.path));
     const stat = await fs.stat(file);
     if (!stat.isFile()) throw new Error("不是文件");
     res.download(file);
@@ -331,8 +411,9 @@ app.get("/api/chats/:id/file", async (req, res, next) => {
 
 app.delete("/api/chats/:id/file", async (req, res, next) => {
   try {
-    const root = chatDir(req.params.id);
-    const file = await assertRealChatFile(root, resolveChatFile(req.params.id, req.query.path));
+    const role = requestRole(req);
+    const root = chatDir(req.params.id, role);
+    const file = await assertRealChatFile(root, resolveChatFile(req.params.id, role, req.query.path));
     const stat = await fs.stat(file);
     if (!stat.isFile()) throw new Error("不是文件");
     await fs.unlink(file);
@@ -360,21 +441,23 @@ function normalizeEffort(value) {
   return ["low", "medium", "high", "xhigh"].includes(effort) ? effort : "medium";
 }
 
-function codexArgs(meta, prompt) {
+function codexArgs(meta, role, prompt) {
   const common = ["--json", "--skip-git-repo-check", "-c", 'approval_policy="never"'];
   if (meta.model) common.push("-m", meta.model);
   if (meta.reasoningEffort) common.push("-c", `model_reasoning_effort="${normalizeEffort(meta.reasoningEffort)}"`);
   if (meta.codexThreadId) {
     return ["exec", "resume", ...common, meta.codexThreadId, "-"];
   }
-  return ["exec", ...common, "-s", "workspace-write", "-C", chatDir(meta.id), "-"];
+  return ["exec", ...common, "-s", "workspace-write", "-C", chatDir(meta.id, role), "-"];
 }
 
 app.post("/api/chats/:id/messages", async (req, res, next) => {
   let meta;
   try {
-    meta = await readMeta(req.params.id);
-    if (activeRuns.has(meta.id)) return res.status(409).json({ error: "这个会话已有任务在运行" });
+    const userRole = requestRole(req);
+    meta = await readMeta(req.params.id, userRole);
+    meta.userRole = userRole;
+    if (activeRuns.has(runKey(userRole, meta.id))) return res.status(409).json({ error: "这个会话已有任务在运行" });
     const content = String(req.body.content || "").trim();
     if (!content) return res.status(400).json({ error: "消息不能为空" });
     if (content.length > 100_000) return res.status(413).json({ error: "消息过长" });
@@ -393,15 +476,15 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
     res.flushHeaders();
     ndjson(res, { type: "user.saved", message: userMessage, chat: { title: meta.title } });
 
-    const child = spawn(CODEX_COMMAND, [...CODEX_PREFIX_ARGS, ...codexArgs(meta, content)], {
-      cwd: chatDir(meta.id),
+    const child = spawn(CODEX_COMMAND, [...CODEX_PREFIX_ARGS, ...codexArgs(meta, userRole, content)], {
+      cwd: chatDir(meta.id, userRole),
       windowsHide: true,
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
       env: process.env,
     });
     const run = { child, stopping: false };
-    activeRuns.set(meta.id, run);
+    activeRuns.set(runKey(userRole, meta.id), run);
     child.stdin.end(content);
 
     let finalText = "";
@@ -431,7 +514,7 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
     child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000); });
     child.on("error", (error) => { stderr += `\n${error.message}`; });
     child.on("close", async (code) => {
-      activeRuns.delete(meta.id);
+      activeRuns.delete(runKey(userRole, meta.id));
       finalText = finalText.trim();
       if (finalText) {
         const assistantMessage = message("assistant", finalText, {
@@ -460,7 +543,7 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
 
 app.post("/api/chats/:id/stop", async (req, res, next) => {
   try {
-    const run = activeRuns.get(req.params.id);
+    const run = activeRuns.get(runKey(requestRole(req), req.params.id));
     if (!run) return res.json({ ok: true, running: false });
     run.stopping = true;
     if (process.platform === "win32") {
@@ -489,7 +572,7 @@ function localAddresses() {
 }
 
 app.listen(PORT, HOST, () => {
-  console.log(`\nLocalGPT 已启动`);
+  console.log(`\nMyGPT 已启动`);
   console.log(`本机访问: http://127.0.0.1:${PORT}`);
   if (LAN_MODE) {
     for (const address of localAddresses()) console.log(`手机访问: http://${address}:${PORT}`);

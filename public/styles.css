@@ -89,6 +89,9 @@ svg {
   line-height: 1;
 }
 
+.brand-logo { width: 25px; height: 25px; border-radius: 8px; object-fit: cover; }
+.hero-logo { width: 43px; height: 43px; border-radius: 13px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+
 .brand-mark { width: 25px; height: 25px; border-radius: 8px; font-size: 13px; }
 
 .new-chat-button {
@@ -197,6 +200,7 @@ svg {
 .message-inner { max-width: 760px; margin: 0 auto; display: flex; gap: 16px; }
 .message-row.user .message-inner { justify-content: flex-end; }
 .message-avatar { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 9px; display: grid; place-items: center; background: var(--dark); color: #fff; font-weight: 700; font-size: 12px; margin-top: 1px; }
+.logo-avatar { object-fit: cover; background: transparent; }
 .message-body { min-width: 0; max-width: calc(100% - 44px); line-height: 1.75; font-size: 15px; }
 .message-row.user .message-body { max-width: min(80%, 620px); background: #f1f1f2; padding: 9px 15px; border-radius: 18px; line-height: 1.55; }
 .message-content { word-break: break-word; }
@@ -295,9 +299,12 @@ svg {
 
 .login-dialog { width: min(390px, calc(100vw - 28px)); border: 0; border-radius: 18px; padding: 0; box-shadow: 0 24px 90px rgba(0,0,0,.25); }
 .login-dialog form { padding: 28px; text-align: center; }
+.login-logo { width: 48px; height: 48px; border-radius: 14px; object-fit: cover; }
 .login-dialog h2 { margin: 17px 0 7px; }
 .login-dialog p { color: var(--muted); line-height: 1.5; margin: 0 0 19px; }
-.login-dialog input { width: 100%; height: 43px; border: 1px solid var(--line); border-radius: 9px; outline: 0; padding: 0 12px; margin-bottom: 8px; }
+.login-field { display: block; text-align: left; margin-bottom: 10px; }
+.login-field span { display: block; color: var(--muted); font-size: 12px; margin: 0 0 5px 2px; }
+.login-dialog input { width: 100%; height: 43px; border: 1px solid var(--line); border-radius: 9px; outline: 0; padding: 0 12px; margin-bottom: 0; }
 .login-dialog input:focus { border-color: #a7a7ab; }
 .form-error { min-height: 22px; color: var(--danger); font-size: 12px; text-align: left; }
 .toast-region { position: fixed; z-index: 200; right: 20px; bottom: 20px; display: flex; flex-direction: column; gap: 8px; }

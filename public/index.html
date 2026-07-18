@@ -4,17 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f7f7f8" />
-    <title>LocalGPT</title>
-    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="MyGPT" />
+    <title>MyGPT</title>
+    <link rel="icon" href="/GPT%20logo.png" type="image/png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/GPT%20logo-180.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div id="app" class="app-shell">
       <aside id="sidebar" class="sidebar">
         <div class="sidebar-top">
-          <button id="brandButton" class="brand" type="button" aria-label="LocalGPT 首页">
-            <span class="brand-mark">L</span>
-            <span>LocalGPT</span>
+          <button id="brandButton" class="brand" type="button" aria-label="MyGPT 首页">
+            <img class="brand-logo" src="/GPT%20logo.png" alt="MyGPT" />
+            <span>MyGPT</span>
           </button>
           <button id="closeSidebarButton" class="icon-button mobile-only" type="button" aria-label="关闭侧栏">
             <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
@@ -50,7 +56,7 @@
             <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
           </button>
           <button id="modelButton" class="model-button" type="button">
-            <span id="topModelName">LocalGPT</span>
+            <span id="topModelName">MyGPT</span>
             <svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
           </button>
           <div class="topbar-actions">
@@ -67,7 +73,7 @@
 
         <section id="conversation" class="conversation">
           <div id="emptyState" class="empty-state">
-            <div class="hero-mark">L</div>
+            <img class="hero-logo" src="/GPT%20logo.png" alt="MyGPT" />
             <h1>有什么可以帮忙的？</h1>
             <p>在本地与 Codex 对话。每段对话都有独立文件夹，上传的文件可直接读取和处理。</p>
             <div class="suggestions">
@@ -91,7 +97,7 @@
                 </button>
                 <button id="effortButton" class="effort-button" type="button">
                   <svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4"/><path d="M8.4 14.5A7 7 0 1 1 15.6 14.5c-.9.7-1.3 1.4-1.4 2.5H9.8c-.1-1.1-.5-1.8-1.4-2.5Z"/></svg>
-                  <span id="effortLabel">高</span>
+                  <span id="effortLabel">标准</span>
                 </button>
               </div>
               <button id="sendButton" class="send-button" type="submit" disabled aria-label="发送">
@@ -131,16 +137,17 @@
     </dialog>
 
     <dialog id="settingsDialog" class="dialog settings-dialog">
-      <div class="dialog-header"><div><h2>设置与连接</h2><p>LocalGPT 直接调用这台电脑上的 Codex CLI。</p></div><button class="icon-button close-dialog" type="button" aria-label="关闭"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="dialog-header"><div><h2>设置与连接</h2><p>MyGPT 直接调用这台电脑上的 Codex CLI。</p></div><button class="icon-button close-dialog" type="button" aria-label="关闭"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
       <div id="settingsContent" class="settings-content"></div>
     </dialog>
 
     <dialog id="loginDialog" class="login-dialog">
       <form id="loginForm" method="dialog">
-        <div class="hero-mark small">L</div>
-        <h2>连接 LocalGPT</h2>
-        <p>请输入服务器终端中显示的访问密码。</p>
-        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="访问密码" required />
+        <img class="login-logo" src="/GPT%20logo.png" alt="MyGPT" />
+        <h2>登录 MyGPT</h2>
+        <p>输入一个用户名，记录会按用户名隔离保存。</p>
+        <label class="login-field"><span>登录用户名</span><input id="roleInput" type="text" autocomplete="username" placeholder="例如 A" required /></label>
+        <label id="passwordField" class="login-field"><span>访问密码</span><input id="passwordInput" type="password" autocomplete="current-password" placeholder="局域网模式需要密码" /></label>
         <div id="loginError" class="form-error"></div>
         <button class="primary-button full" type="submit">连接</button>
       </form>

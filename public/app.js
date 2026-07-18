@@ -40,7 +40,9 @@ const elements = {
   connectionText: $("#connectionText"),
   loginDialog: $("#loginDialog"),
   loginForm: $("#loginForm"),
+  role: $("#roleInput"),
   password: $("#passwordInput"),
+  passwordField: $("#passwordField"),
   loginError: $("#loginError"),
   toasts: $("#toastRegion"),
 };
@@ -228,9 +230,9 @@ function renderMessages(scroll = false) {
     if (item.role === "user") {
       return `<article class="message-row user" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-body"><div class="message-content">${inlineMarkdown(item.content).replace(/\n/g, "<br>")}</div></div></div></article>`;
     }
-    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-avatar">L</div><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div><div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}</div></div></div></article>`;
+    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div><div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}</div></div></div></article>`;
   }).join("");
-  const activity = state.running ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">L</div><div class="message-body activity"><span class="thinking-dot"></span><span>${escapeHtml(state.activity || "Codex 正在思考…")}</span></div></div></article>` : "";
+  const activity = state.running ? `<article class="message-row assistant"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body activity"><span class="thinking-dot"></span><span>${escapeHtml(state.activity || "Codex 正在思考…")}</span></div></div></article>` : "";
   const error = state.streamError ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">!</div><div class="message-body error-message">${escapeHtml(state.streamError)}</div></div></article>` : "";
   elements.messages.innerHTML = html + activity + error;
   if (scroll) requestAnimationFrame(() => { elements.conversation.scrollTop = elements.conversation.scrollHeight; });
@@ -281,11 +283,13 @@ function renderSettings() {
   const address = location.origin;
   elements.settingsContent.innerHTML = `
     <div class="setting-row"><label>当前地址</label><div class="setting-value"><code>${escapeHtml(address)}</code></div></div>
+    <div class="setting-row"><label>当前用户名</label><div class="setting-value"><code>${escapeHtml(state.config.userRole || "")}</code></div></div>
     <div class="setting-row"><label>访问模式</label><div class="setting-value">${state.config.lanMode ? "局域网（密码保护）" : "仅限本机"}</div></div>
     <div class="setting-row"><label>会话目录</label><div class="setting-value"><code>${escapeHtml(state.config.dataRoot)}</code></div></div>
     <div class="setting-row"><label>默认模型</label><div class="setting-value">${escapeHtml(state.config.defaultModel || "由 Codex 自动选择")}</div></div>
     <div class="setting-row"><label>单文件上限</label><div class="setting-value">${state.config.maxUploadMb} MB</div></div>
     <div class="settings-help">手机访问时，请确保手机和电脑连接同一 Wi‑Fi，并使用服务器启动后终端显示的局域网地址。如果无法打开，请在 Windows 防火墙中允许 Node.js 访问“专用网络”。</div>
+    <button id="switchRoleButton" class="secondary-button" type="button">切换登录用户名</button>
   `;
 }
 
@@ -321,7 +325,7 @@ function closePopovers(except = null) {
 
 function showLogin() {
   if (!elements.loginDialog.open) elements.loginDialog.showModal();
-  setTimeout(() => elements.password.focus(), 20);
+  setTimeout(() => elements.role.focus(), 20);
 }
 
 async function loadChats() {
@@ -525,13 +529,16 @@ async function deleteChat(id) {
 async function bootstrap() {
   const status = await fetch("/api/auth/status").then((response) => response.json());
   if (status.required && !status.authenticated) {
+    elements.passwordField.hidden = false;
+    elements.passwordField.querySelector("span").textContent = status.passwordRequired ? "访问密码" : "访问密码（本机模式可留空）";
+    elements.password.required = Boolean(status.passwordRequired);
     showLogin();
     return;
   }
   state.config = await api("/api/config");
   state.draftModel = state.config.defaultModel || state.config.suggestedModels[0] || "";
   state.draftEffort = state.config.defaultReasoningEffort || "medium";
-  elements.connectionText.textContent = state.config.lanMode ? "局域网安全连接" : `127.0.0.1:${state.config.port}`;
+  elements.connectionText.textContent = `${state.config.userRole} · ${state.config.lanMode ? "局域网安全连接" : `127.0.0.1:${state.config.port}`}`;
   await loadChats();
   if (state.chats.length) await selectChat(state.chats[0].id, { closeMobile: false });
   else renderAll();
@@ -562,6 +569,18 @@ elements.fileInput.addEventListener("change", () => uploadFiles(elements.fileInp
 elements.refreshFiles.addEventListener("click", () => refreshFiles().catch((error) => toast(error.message, "error")));
 elements.filesButton.addEventListener("click", async () => { await refreshFiles(); elements.filesDialog.showModal(); });
 elements.settingsButton.addEventListener("click", () => { renderSettings(); elements.settingsDialog.showModal(); closeSidebar(); });
+document.addEventListener("click", async (event) => {
+  if (!event.target.closest("#switchRoleButton")) return;
+  try {
+    await fetch("/api/auth/logout", { method: "POST" });
+    elements.settingsDialog.close();
+    state.current = null;
+    state.chats = [];
+    state.files = [];
+    renderAll();
+    await bootstrap();
+  } catch (error) { toast(error.message, "error"); }
+});
 elements.rename.addEventListener("click", async () => {
   if (!state.current) return;
   const title = prompt("对话名称", state.current.title);
@@ -638,10 +657,11 @@ elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   elements.loginError.textContent = "";
   try {
-    const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: elements.password.value }) });
+    const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role: elements.role.value, password: elements.password.value }) });
     if (!response.ok) throw new Error((await response.json()).error || "连接失败");
     elements.loginDialog.close();
     elements.password.value = "";
+    elements.role.value = "";
     await bootstrap();
   } catch (error) { elements.loginError.textContent = error.message; }
 });

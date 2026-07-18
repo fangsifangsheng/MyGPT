@@ -1,6 +1,8 @@
-# LocalGPT
+# MyGPT
 
-LocalGPT 是一个运行在本机的 ChatGPT 风格网页，用来调用本机已经登录的 Codex CLI。每个新对话对应一个独立目录，上传的文件直接存入该目录，Codex 以这个目录作为工作区读取和处理文件。
+MyGPT 是一个运行在本机的 ChatGPT 风格网页，用来调用本机已经登录的 Codex CLI。登录用户名决定独立的数据空间：例如用户名 `A` 的对话、文件和 Codex 线程只属于该用户名。
+
+网页已经配置为可安装的 PWA：手机浏览器添加到主屏幕时，会使用 GPT logo 作为应用图标，应用名称显示为 `MyGPT`。如果之前已经添加过旧图标，请先从主屏幕移除旧快捷方式，再重新添加一次。
 
 ## 本机启动
 
@@ -13,7 +15,7 @@ npm start
 
 浏览器打开 <http://127.0.0.1:4317>。
 
-也可以直接双击项目目录中的 `start-localgpt.cmd` 启动，双击 `stop-localgpt.cmd` 关闭。运行中的服务 PID 会记录在 `.localgpt.pid`，输出和错误日志在 `logs/`。
+也可以直接双击项目目录中的 `start-localgpt.cmd` 启动，双击 `stop-localgpt.cmd` 关闭。运行中的服务 PID 会记录在 `.localgpt.pid`，输出和错误日志在 `logs/`。首次打开会要求输入登录用户名；本机模式密码可留空，局域网模式需要密码。
 
 可以在启动前用环境变量覆盖默认配置：
 
@@ -62,19 +64,23 @@ npm run lan
 
 ## 数据位置
 
-默认数据目录是项目根目录下的 `chats`：
+默认数据目录是项目根目录下的 `chats`，每个用户名有独立子目录：
 
 ```text
 chats/
-└── chat-20260719-120000-ab12/
-    ├── .localgpt/
-    │   └── chat.json
-    ├── 用户上传的文件.pdf
-    └── Codex 创建或修改的文件.md
+└── users/
+    ├── A/
+    │   └── chat-20260719-120000-ab12/
+    └── other-user/
+        └── chat-20260719-120100-cd34/
+        ├── .localgpt/
+        │   └── chat.json
+        ├── 用户上传的文件.pdf
+        └── Codex 创建或修改的文件.md
 ```
 
-隐藏的 `.localgpt/chat.json` 保存标题、消息记录和 Codex 线程 ID。其他文件都属于用户的会话工作区，Codex 可以直接看到。
+隐藏的 `.localgpt/chat.json` 保存标题、消息记录和 Codex 线程 ID。旧版本根目录下的聊天会自动迁移到 `users/default`。
 
 ## 权限说明
 
-Codex 使用 `workspace-write` 模式运行，工作目录限定为当前会话文件夹，并继承本机 Codex 的登录状态、模型提供商配置和其他个人配置。LocalGPT 是个人本地工具，不是面向公网或不受信任用户的多用户生产服务。重要文件请自行备份。
+Codex 使用 `workspace-write` 模式运行，工作目录限定为当前用户名的当前会话文件夹，并继承本机 Codex 的登录状态、模型提供商配置和其他个人配置。MyGPT 是个人本地工具，不是面向公网或不受信任用户的多用户生产服务。重要文件请自行备份。

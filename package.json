@@ -1,5 +1,5 @@
 {
-  "name": "localgpt",
+  "name": "mygpt",
   "version": "0.1.0",
   "private": true,
   "description": "A private, browser-based interface for the local Codex CLI.",
