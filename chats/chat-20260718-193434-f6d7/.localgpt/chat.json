@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "id": "chat-20260718-193434-f6d7",
+  "title": "hello",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "high",
+  "codexThreadId": "019f76b9-2cb3-7df1-86c9-093adc6438a0",
+  "createdAt": "2026-07-18T19:34:34.734Z",
+  "updatedAt": "2026-07-18T19:35:19.725Z",
+  "messages": [
+    {
+      "id": "aff2099d-72b7-4bdf-95f9-5d0b0f2f1c7b",
+      "role": "user",
+      "content": "hello",
+      "createdAt": "2026-07-18T19:34:34.752Z"
+    },
+    {
+      "id": "cc9972b1-3bd2-4e07-940a-ff6b3ebbf2a6",
+      "role": "assistant",
+      "content": "Hello! How can I help you today?",
+      "createdAt": "2026-07-18T19:34:43.278Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "input_tokens": 17701,
+        "cached_input_tokens": 3840,
+        "output_tokens": 13,
+        "reasoning_output_tokens": 0
+      }
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+node_modules/
+.localgpt-data/
+.smoke-data/
+.smoke-lan-data/
+logs/
+.localgpt.pid
+.env
+npm-debug.log*

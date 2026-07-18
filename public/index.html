@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f7f8" />
+    <title>LocalGPT</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app-shell">
+      <aside id="sidebar" class="sidebar">
+        <div class="sidebar-top">
+          <button id="brandButton" class="brand" type="button" aria-label="LocalGPT 首页">
+            <span class="brand-mark">L</span>
+            <span>LocalGPT</span>
+          </button>
+          <button id="closeSidebarButton" class="icon-button mobile-only" type="button" aria-label="关闭侧栏">
+            <svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+        <button id="newChatButton" class="new-chat-button" type="button">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+          <span>新建对话</span>
+          <span class="shortcut">Ctrl K</span>
+        </button>
+        <div class="sidebar-section-label">对话</div>
+        <nav id="chatList" class="chat-list" aria-label="对话列表"></nav>
+        <div class="sidebar-footer">
+          <div class="connection-card">
+            <span class="status-dot"></span>
+            <div>
+              <strong>本地 Codex</strong>
+              <small id="connectionText">正在连接…</small>
+            </div>
+          </div>
+          <button id="settingsButton" class="sidebar-action" type="button">
+            <svg viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>
+            <span>设置与连接</span>
+          </button>
+        </div>
+      </aside>
+
+      <button id="sidebarBackdrop" class="sidebar-backdrop" type="button" aria-label="关闭侧栏"></button>
+
+      <main class="main">
+        <header class="topbar">
+          <button id="menuButton" class="icon-button mobile-only" type="button" aria-label="打开侧栏">
+            <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+          </button>
+          <button id="modelButton" class="model-button" type="button">
+            <span id="topModelName">LocalGPT</span>
+            <svg viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+          </button>
+          <div class="topbar-actions">
+            <button id="filesButton" class="topbar-button" type="button" disabled>
+              <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10l2 2h5.5A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-11Z"/></svg>
+              <span class="desktop-label">文件</span>
+              <span id="fileCountBadge" class="badge">0</span>
+            </button>
+            <button id="renameButton" class="icon-button" type="button" aria-label="重命名对话" disabled>
+              <svg viewBox="0 0 24 24"><path d="m4 20 4.4-1 10-10a2.1 2.1 0 0 0-3-3l-10 10L4 20Z"/><path d="m13.5 8 3 3"/></svg>
+            </button>
+          </div>
+        </header>
+
+        <section id="conversation" class="conversation">
+          <div id="emptyState" class="empty-state">
+            <div class="hero-mark">L</div>
+            <h1>有什么可以帮忙的？</h1>
+            <p>在本地与 Codex 对话。每段对话都有独立文件夹，上传的文件可直接读取和处理。</p>
+            <div class="suggestions">
+              <button type="button" data-prompt="阅读我上传的文件，先总结它的结构和关键内容。"><strong>阅读文件</strong><span>总结结构和关键内容</span></button>
+              <button type="button" data-prompt="检查当前目录中的代码，告诉我项目结构和如何运行。"><strong>理解项目</strong><span>分析目录与运行方式</span></button>
+              <button type="button" data-prompt="帮我整理当前目录中的资料，给出清晰的分类建议。"><strong>整理资料</strong><span>归类并提出建议</span></button>
+              <button type="button" data-prompt="查看当前目录，告诉我接下来最值得做的三件事。"><strong>规划下一步</strong><span>根据上下文给出行动项</span></button>
+            </div>
+          </div>
+          <div id="messages" class="messages" aria-live="polite"></div>
+        </section>
+
+        <div class="composer-region">
+          <div id="pendingFiles" class="pending-files"></div>
+          <form id="composerForm" class="composer">
+            <textarea id="messageInput" rows="1" placeholder="给 Codex 发消息" aria-label="消息"></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-tools">
+                <button id="attachButton" class="round-button" type="button" aria-label="上传文件" title="上传文件">
+                  <svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.2 8.2a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.6l-9.1 9.1a2 2 0 0 1-2.8-2.8l8.4-8.4"/></svg>
+                </button>
+                <button id="effortButton" class="effort-button" type="button">
+                  <svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4"/><path d="M8.4 14.5A7 7 0 1 1 15.6 14.5c-.9.7-1.3 1.4-1.4 2.5H9.8c-.1-1.1-.5-1.8-1.4-2.5Z"/></svg>
+                  <span id="effortLabel">高</span>
+                </button>
+              </div>
+              <button id="sendButton" class="send-button" type="submit" disabled aria-label="发送">
+                <svg class="send-icon" viewBox="0 0 24 24"><path d="M12 19V5M6.5 10.5 12 5l5.5 5.5"/></svg>
+                <svg class="stop-icon" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1"/></svg>
+              </button>
+            </div>
+          </form>
+          <div class="composer-note">Codex 可能会犯错，请检查重要信息和文件改动。</div>
+        </div>
+      </main>
+    </div>
+
+    <input id="fileInput" type="file" multiple hidden />
+
+    <div id="modelMenu" class="popover model-menu" hidden>
+      <div class="popover-title">选择模型</div>
+      <div id="modelOptions" class="option-list"></div>
+      <label class="custom-model">
+        <span>其他模型 ID</span>
+        <div><input id="customModelInput" type="text" placeholder="例如 gpt-5.6" /><button id="useCustomModelButton" type="button">使用</button></div>
+      </label>
+    </div>
+
+    <div id="effortMenu" class="popover effort-menu" hidden>
+      <div class="popover-title">推理强度</div>
+      <button type="button" data-effort="low"><span>快速</span><small>适合简单问题</small></button>
+      <button type="button" data-effort="medium"><span>标准</span><small>速度与质量平衡</small></button>
+      <button type="button" data-effort="high"><span>深入</span><small>复杂、多步骤任务</small></button>
+      <button type="button" data-effort="xhigh"><span>最深</span><small>最难的任务</small></button>
+    </div>
+
+    <dialog id="filesDialog" class="dialog files-dialog">
+      <div class="dialog-header"><div><h2>会话文件</h2><p>这些文件位于当前会话目录，Codex 可以直接读写。</p></div><button class="icon-button close-dialog" type="button" aria-label="关闭"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div class="dialog-actions"><button id="dialogUploadButton" class="primary-button" type="button"><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 20h14"/></svg>上传文件</button><button id="refreshFilesButton" class="secondary-button" type="button">刷新</button></div>
+      <div id="fileList" class="file-list"></div>
+    </dialog>
+
+    <dialog id="settingsDialog" class="dialog settings-dialog">
+      <div class="dialog-header"><div><h2>设置与连接</h2><p>LocalGPT 直接调用这台电脑上的 Codex CLI。</p></div><button class="icon-button close-dialog" type="button" aria-label="关闭"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div>
+      <div id="settingsContent" class="settings-content"></div>
+    </dialog>
+
+    <dialog id="loginDialog" class="login-dialog">
+      <form id="loginForm" method="dialog">
+        <div class="hero-mark small">L</div>
+        <h2>连接 LocalGPT</h2>
+        <p>请输入服务器终端中显示的访问密码。</p>
+        <input id="passwordInput" type="password" autocomplete="current-password" placeholder="访问密码" required />
+        <div id="loginError" class="form-error"></div>
+        <button class="primary-button full" type="submit">连接</button>
+      </form>
+    </dialog>
+
+    <div id="toastRegion" class="toast-region" aria-live="assertive"></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

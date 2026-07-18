@@ -1,0 +1,653 @@
+const $ = (selector) => document.querySelector(selector);
+const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+const elements = {
+  sidebar: $("#sidebar"),
+  backdrop: $("#sidebarBackdrop"),
+  chatList: $("#chatList"),
+  newChat: $("#newChatButton"),
+  menu: $("#menuButton"),
+  closeSidebar: $("#closeSidebarButton"),
+  brand: $("#brandButton"),
+  conversation: $("#conversation"),
+  empty: $("#emptyState"),
+  messages: $("#messages"),
+  form: $("#composerForm"),
+  input: $("#messageInput"),
+  send: $("#sendButton"),
+  attach: $("#attachButton"),
+  fileInput: $("#fileInput"),
+  pendingFiles: $("#pendingFiles"),
+  filesButton: $("#filesButton"),
+  fileCount: $("#fileCountBadge"),
+  rename: $("#renameButton"),
+  modelButton: $("#modelButton"),
+  modelName: $("#topModelName"),
+  modelMenu: $("#modelMenu"),
+  modelOptions: $("#modelOptions"),
+  customModel: $("#customModelInput"),
+  useCustomModel: $("#useCustomModelButton"),
+  effortButton: $("#effortButton"),
+  effortLabel: $("#effortLabel"),
+  effortMenu: $("#effortMenu"),
+  filesDialog: $("#filesDialog"),
+  dialogUpload: $("#dialogUploadButton"),
+  refreshFiles: $("#refreshFilesButton"),
+  fileList: $("#fileList"),
+  settingsButton: $("#settingsButton"),
+  settingsDialog: $("#settingsDialog"),
+  settingsContent: $("#settingsContent"),
+  connectionText: $("#connectionText"),
+  loginDialog: $("#loginDialog"),
+  loginForm: $("#loginForm"),
+  password: $("#passwordInput"),
+  loginError: $("#loginError"),
+  toasts: $("#toastRegion"),
+};
+
+const effortNames = { low: "快速", medium: "标准", high: "深入", xhigh: "最深" };
+const state = {
+  config: null,
+  chats: [],
+  current: null,
+  files: [],
+  running: false,
+  activity: "",
+  streamError: "",
+  draftModel: "",
+  draftEffort: "medium",
+  booted: false,
+};
+
+async function api(url, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const response = await fetch(url, { ...options, headers });
+  if (response.status === 401) {
+    showLogin();
+    throw new Error("需要访问密码");
+  }
+  if (!response.ok) {
+    let error = `请求失败（${response.status}）`;
+    try { error = (await response.json()).error || error; } catch {}
+    throw new Error(error);
+  }
+  const type = response.headers.get("content-type") || "";
+  return type.includes("application/json") ? response.json() : response;
+}
+
+function toast(text, type = "") {
+  const item = document.createElement("div");
+  item.className = `toast ${type}`;
+  item.textContent = text;
+  elements.toasts.append(item);
+  setTimeout(() => item.remove(), 3200);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[char]);
+}
+
+function inlineMarkdown(value) {
+  const code = [];
+  let text = escapeHtml(value).replace(/`([^`]+)`/g, (_, content) => {
+    const key = `LOCALGPTINLINECODE${code.length}TOKEN`;
+    code.push(`<code>${content}</code>`);
+    return key;
+  });
+  text = text
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+  code.forEach((html, index) => { text = text.replace(`LOCALGPTINLINECODE${index}TOKEN`, html); });
+  return text;
+}
+
+function renderMarkdown(value) {
+  const lines = String(value ?? "").replace(/\r\n/g, "\n").split("\n");
+  const output = [];
+  let code = null;
+  let language = "";
+  let list = null;
+  const closeList = () => {
+    if (list) output.push(`</${list}>`);
+    list = null;
+  };
+
+  for (const line of lines) {
+    const fence = line.match(/^```\s*([\w.+-]*)\s*$/);
+    if (fence) {
+      if (code) {
+        output.push(`<div class="code-block"><div class="code-header"><span>${escapeHtml(language || "code")}</span><button class="copy-code" type="button">复制</button></div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
+        code = null;
+        language = "";
+      } else {
+        closeList();
+        code = [];
+        language = fence[1];
+      }
+      continue;
+    }
+    if (code) {
+      code.push(line);
+      continue;
+    }
+    if (!line.trim()) {
+      closeList();
+      continue;
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      closeList();
+      const level = heading[1].length;
+      output.push(`<h${level}>${inlineMarkdown(heading[2])}</h${level}>`);
+      continue;
+    }
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/);
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (bullet || ordered) {
+      const kind = bullet ? "ul" : "ol";
+      if (list !== kind) {
+        closeList();
+        list = kind;
+        output.push(`<${kind}>`);
+      }
+      output.push(`<li>${inlineMarkdown((bullet || ordered)[1])}</li>`);
+      continue;
+    }
+    closeList();
+    if (/^>\s+/.test(line)) {
+      output.push(`<blockquote>${inlineMarkdown(line.replace(/^>\s+/, ""))}</blockquote>`);
+    } else {
+      output.push(`<p>${inlineMarkdown(line)}</p>`);
+    }
+  }
+  if (code) {
+    output.push(`<div class="code-block"><div class="code-header"><span>${escapeHtml(language || "code")}</span><button class="copy-code" type="button">复制</button></div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
+  }
+  closeList();
+  return output.join("");
+}
+
+function icon(name) {
+  const paths = {
+    copy: '<path d="M9 9h10v10H9z"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+    file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/>',
+    download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+    trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
+    folder: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10l2 2h5.5A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-11Z"/>',
+    dots: '<path d="M5 12h.01M12 12h.01M19 12h.01"/>',
+  };
+  return `<svg viewBox="0 0 24 24">${paths[name] || ""}</svg>`;
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function formatTime(value) {
+  try {
+    return new Intl.DateTimeFormat("zh-CN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  } catch { return ""; }
+}
+
+function currentModel() {
+  return state.current?.model || state.draftModel || state.config?.defaultModel || "Codex 默认模型";
+}
+
+function currentEffort() {
+  return state.current?.reasoningEffort || state.draftEffort || "medium";
+}
+
+function renderChats() {
+  if (!state.chats.length) {
+    elements.chatList.innerHTML = '<div class="empty-list" style="min-height:100px;font-size:12px">还没有对话</div>';
+    return;
+  }
+  elements.chatList.innerHTML = state.chats.map((chat) => `
+    <div class="chat-item ${state.current?.id === chat.id ? "active" : ""}" data-chat-id="${escapeHtml(chat.id)}" role="button" tabindex="0">
+      <span class="chat-item-title">${escapeHtml(chat.title)}</span>
+      ${chat.running ? '<span class="chat-item-running"></span>' : ""}
+      <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话">${icon("dots")}</button>
+    </div>
+  `).join("");
+}
+
+function renderMessages(scroll = false) {
+  const messages = state.current?.messages || [];
+  elements.empty.hidden = messages.length > 0 || state.running || Boolean(state.streamError);
+  const html = messages.map((item) => {
+    if (item.role === "user") {
+      return `<article class="message-row user" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-body"><div class="message-content">${inlineMarkdown(item.content).replace(/\n/g, "<br>")}</div></div></div></article>`;
+    }
+    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-avatar">L</div><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div><div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}</div></div></div></article>`;
+  }).join("");
+  const activity = state.running ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">L</div><div class="message-body activity"><span class="thinking-dot"></span><span>${escapeHtml(state.activity || "Codex 正在思考…")}</span></div></div></article>` : "";
+  const error = state.streamError ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">!</div><div class="message-body error-message">${escapeHtml(state.streamError)}</div></div></article>` : "";
+  elements.messages.innerHTML = html + activity + error;
+  if (scroll) requestAnimationFrame(() => { elements.conversation.scrollTop = elements.conversation.scrollHeight; });
+}
+
+function renderHeader() {
+  elements.modelName.textContent = currentModel();
+  elements.effortLabel.textContent = effortNames[currentEffort()] || currentEffort();
+  elements.fileCount.textContent = String(state.files.length);
+  elements.filesButton.disabled = !state.current;
+  elements.rename.disabled = !state.current;
+  elements.send.classList.toggle("running", state.running);
+  updateSendButton();
+}
+
+function renderModelMenu() {
+  const models = state.config?.suggestedModels || [];
+  elements.modelOptions.innerHTML = models.map((model) => `
+    <button class="model-option ${currentModel() === model ? "active" : ""}" type="button" data-model="${escapeHtml(model)}">${escapeHtml(model)}</button>
+  `).join("");
+  elements.customModel.value = models.includes(currentModel()) ? "" : currentModel();
+}
+
+function renderEffortMenu() {
+  $$("#effortMenu [data-effort]").forEach((button) => button.classList.toggle("active", button.dataset.effort === currentEffort()));
+}
+
+function renderFiles() {
+  elements.fileCount.textContent = String(state.files.length);
+  if (!state.files.length) {
+    elements.fileList.innerHTML = `<div class="empty-list">${icon("folder")}<span>这个会话还没有文件</span></div>`;
+    return;
+  }
+  elements.fileList.innerHTML = state.files.map((file) => `
+    <div class="file-row">
+      <div class="file-icon">${icon("file")}</div>
+      <div class="file-info"><strong title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</strong><small>${formatBytes(file.size)} · ${formatTime(file.updatedAt)}</small></div>
+      <div class="file-actions">
+        <a class="icon-button" href="/api/chats/${encodeURIComponent(state.current.id)}/file?path=${encodeURIComponent(file.path)}" title="下载">${icon("download")}</a>
+        <button class="icon-button" type="button" data-delete-file="${escapeHtml(file.path)}" title="删除">${icon("trash")}</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderSettings() {
+  if (!state.config) return;
+  const address = location.origin;
+  elements.settingsContent.innerHTML = `
+    <div class="setting-row"><label>当前地址</label><div class="setting-value"><code>${escapeHtml(address)}</code></div></div>
+    <div class="setting-row"><label>访问模式</label><div class="setting-value">${state.config.lanMode ? "局域网（密码保护）" : "仅限本机"}</div></div>
+    <div class="setting-row"><label>会话目录</label><div class="setting-value"><code>${escapeHtml(state.config.dataRoot)}</code></div></div>
+    <div class="setting-row"><label>默认模型</label><div class="setting-value">${escapeHtml(state.config.defaultModel || "由 Codex 自动选择")}</div></div>
+    <div class="setting-row"><label>单文件上限</label><div class="setting-value">${state.config.maxUploadMb} MB</div></div>
+    <div class="settings-help">手机访问时，请确保手机和电脑连接同一 Wi‑Fi，并使用服务器启动后终端显示的局域网地址。如果无法打开，请在 Windows 防火墙中允许 Node.js 访问“专用网络”。</div>
+  `;
+}
+
+function renderAll(scroll = false) {
+  renderChats();
+  renderMessages(scroll);
+  renderHeader();
+  renderModelMenu();
+  renderEffortMenu();
+  renderFiles();
+  renderSettings();
+}
+
+function updateSendButton() {
+  elements.send.disabled = !state.running && !elements.input.value.trim();
+  elements.send.title = state.running ? "停止生成" : "发送";
+}
+
+function resizeInput() {
+  elements.input.style.height = "auto";
+  elements.input.style.height = `${Math.min(elements.input.scrollHeight, 190)}px`;
+  updateSendButton();
+}
+
+function openSidebar() { document.body.classList.add("sidebar-open"); }
+function closeSidebar() { document.body.classList.remove("sidebar-open"); }
+
+function closePopovers(except = null) {
+  [elements.modelMenu, elements.effortMenu].forEach((menu) => {
+    if (menu !== except) menu.hidden = true;
+  });
+}
+
+function showLogin() {
+  if (!elements.loginDialog.open) elements.loginDialog.showModal();
+  setTimeout(() => elements.password.focus(), 20);
+}
+
+async function loadChats() {
+  state.chats = await api("/api/chats");
+}
+
+async function refreshFiles() {
+  if (!state.current) {
+    state.files = [];
+  } else {
+    state.files = await api(`/api/chats/${encodeURIComponent(state.current.id)}/files`);
+  }
+  renderFiles();
+  renderHeader();
+}
+
+async function selectChat(id, { closeMobile = true } = {}) {
+  state.current = await api(`/api/chats/${encodeURIComponent(id)}`);
+  state.running = Boolean(state.current.running);
+  state.activity = state.running ? "任务正在后台运行…" : "";
+  state.streamError = "";
+  await refreshFiles();
+  renderAll(true);
+  if (closeMobile) closeSidebar();
+}
+
+async function createChat() {
+  const chat = await api("/api/chats", {
+    method: "POST",
+    body: JSON.stringify({ model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort() }),
+  });
+  await loadChats();
+  await selectChat(chat.id);
+  return state.current;
+}
+
+async function ensureChat() {
+  return state.current || createChat();
+}
+
+async function updateChat(values) {
+  if (!state.current) return;
+  state.current = await api(`/api/chats/${encodeURIComponent(state.current.id)}`, { method: "PATCH", body: JSON.stringify(values) });
+  await loadChats();
+  renderAll();
+}
+
+async function chooseModel(model) {
+  model = String(model || "").trim();
+  if (!model) return;
+  if (state.current) await updateChat({ model });
+  else state.draftModel = model;
+  elements.modelMenu.hidden = true;
+  renderAll();
+}
+
+async function chooseEffort(effort) {
+  if (!effortNames[effort]) return;
+  if (state.current) await updateChat({ reasoningEffort: effort });
+  else state.draftEffort = effort;
+  elements.effortMenu.hidden = true;
+  renderAll();
+}
+
+async function uploadFiles(fileList) {
+  const files = [...fileList];
+  if (!files.length) return;
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  elements.pendingFiles.innerHTML = files.map((file) => `<div class="pending-file">${icon("file")}<span>${escapeHtml(file.name)}</span></div>`).join("");
+  try {
+    const chat = await ensureChat();
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file));
+    const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/files`, { method: "POST", body: form });
+    if (response.status === 401) { showLogin(); throw new Error("需要访问密码"); }
+    if (!response.ok) {
+      let error = `上传失败（${response.status}）`;
+      try { error = (await response.json()).error || error; } catch {}
+      throw new Error(error);
+    }
+    await refreshFiles();
+    toast(`已上传 ${files.length} 个文件（${formatBytes(total)}）`);
+  } catch (error) {
+    toast(error.message, "error");
+  } finally {
+    elements.pendingFiles.innerHTML = "";
+    elements.fileInput.value = "";
+  }
+}
+
+async function stopGeneration() {
+  if (!state.current || !state.running) return;
+  state.activity = "正在停止…";
+  renderMessages(true);
+  try {
+    await api(`/api/chats/${encodeURIComponent(state.current.id)}/stop`, { method: "POST" });
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+async function sendMessage() {
+  const content = elements.input.value.trim();
+  if (!content || state.running) return;
+  const chat = await ensureChat();
+  state.running = true;
+  state.streamError = "";
+  state.activity = "正在连接 Codex…";
+  const optimistic = { id: `temp-${Date.now()}`, role: "user", content, createdAt: new Date().toISOString() };
+  state.current.messages.push(optimistic);
+  elements.input.value = "";
+  resizeInput();
+  renderAll(true);
+
+  try {
+    const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort() }),
+    });
+    if (response.status === 401) { showLogin(); throw new Error("需要访问密码"); }
+    if (!response.ok || !response.body) {
+      let error = `发送失败（${response.status}）`;
+      try { error = (await response.json()).error || error; } catch {}
+      throw new Error(error);
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let persistedUser = false;
+    while (true) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let event;
+        try { event = JSON.parse(line); } catch { continue; }
+        if (event.type === "user.saved") {
+          const index = state.current.messages.findIndex((item) => item.id === optimistic.id);
+          if (index >= 0) state.current.messages[index] = event.message;
+          persistedUser = true;
+          if (event.chat?.title) state.current.title = event.chat.title;
+        } else if (event.type === "activity") {
+          state.activity = event.text;
+        } else if (event.type === "assistant.message") {
+          state.current.messages.push(event.message);
+        } else if (event.type === "error") {
+          state.streamError = event.error;
+        } else if (event.type === "stopped") {
+          state.activity = "已停止";
+        }
+        renderMessages(true);
+      }
+      if (done) break;
+    }
+    if (!persistedUser) {
+      const latest = await api(`/api/chats/${encodeURIComponent(chat.id)}`);
+      state.current = latest;
+    }
+  } catch (error) {
+    state.streamError = error.message;
+    const latest = await api(`/api/chats/${encodeURIComponent(chat.id)}`).catch(() => null);
+    if (latest) state.current = latest;
+  } finally {
+    state.running = false;
+    state.activity = "";
+    await loadChats().catch(() => {});
+    const latest = state.current ? await api(`/api/chats/${encodeURIComponent(state.current.id)}`).catch(() => null) : null;
+    if (latest) state.current = latest;
+    await refreshFiles().catch(() => {});
+    renderAll(true);
+  }
+}
+
+async function deleteFile(relative) {
+  if (!state.current || !confirm(`删除文件“${relative}”？`)) return;
+  try {
+    await api(`/api/chats/${encodeURIComponent(state.current.id)}/file?path=${encodeURIComponent(relative)}`, { method: "DELETE" });
+    await refreshFiles();
+  } catch (error) { toast(error.message, "error"); }
+}
+
+async function deleteChat(id) {
+  const chat = state.chats.find((item) => item.id === id);
+  if (!chat || !confirm(`删除对话“${chat.title}”及其中的全部文件？此操作无法撤销。`)) return;
+  try {
+    await api(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (state.current?.id === id) {
+      state.current = null;
+      state.files = [];
+      state.running = false;
+    }
+    await loadChats();
+    if (!state.current && state.chats.length) await selectChat(state.chats[0].id, { closeMobile: false });
+    else renderAll();
+  } catch (error) { toast(error.message, "error"); }
+}
+
+async function bootstrap() {
+  const status = await fetch("/api/auth/status").then((response) => response.json());
+  if (status.required && !status.authenticated) {
+    showLogin();
+    return;
+  }
+  state.config = await api("/api/config");
+  state.draftModel = state.config.defaultModel || state.config.suggestedModels[0] || "";
+  state.draftEffort = state.config.defaultReasoningEffort || "medium";
+  elements.connectionText.textContent = state.config.lanMode ? "局域网安全连接" : `127.0.0.1:${state.config.port}`;
+  await loadChats();
+  if (state.chats.length) await selectChat(state.chats[0].id, { closeMobile: false });
+  else renderAll();
+  state.booted = true;
+}
+
+elements.input.addEventListener("input", resizeInput);
+elements.input.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    if (!elements.send.disabled) state.running ? stopGeneration() : sendMessage();
+  }
+});
+elements.form.addEventListener("submit", (event) => {
+  event.preventDefault();
+  state.running ? stopGeneration() : sendMessage();
+});
+elements.newChat.addEventListener("click", async () => {
+  try { await createChat(); elements.input.focus(); } catch (error) { toast(error.message, "error"); }
+});
+elements.brand.addEventListener("click", () => { state.current = null; state.files = []; state.running = false; renderAll(); closeSidebar(); });
+elements.menu.addEventListener("click", openSidebar);
+elements.closeSidebar.addEventListener("click", closeSidebar);
+elements.backdrop.addEventListener("click", closeSidebar);
+elements.attach.addEventListener("click", () => elements.fileInput.click());
+elements.dialogUpload.addEventListener("click", () => elements.fileInput.click());
+elements.fileInput.addEventListener("change", () => uploadFiles(elements.fileInput.files));
+elements.refreshFiles.addEventListener("click", () => refreshFiles().catch((error) => toast(error.message, "error")));
+elements.filesButton.addEventListener("click", async () => { await refreshFiles(); elements.filesDialog.showModal(); });
+elements.settingsButton.addEventListener("click", () => { renderSettings(); elements.settingsDialog.showModal(); closeSidebar(); });
+elements.rename.addEventListener("click", async () => {
+  if (!state.current) return;
+  const title = prompt("对话名称", state.current.title);
+  if (title?.trim()) await updateChat({ title: title.trim() });
+});
+elements.modelButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  renderModelMenu();
+  elements.modelMenu.hidden = !elements.modelMenu.hidden;
+  closePopovers(elements.modelMenu.hidden ? null : elements.modelMenu);
+});
+elements.effortButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  renderEffortMenu();
+  const rect = elements.effortButton.getBoundingClientRect();
+  elements.effortMenu.style.left = `${Math.max(10, rect.left)}px`;
+  elements.effortMenu.hidden = !elements.effortMenu.hidden;
+  closePopovers(elements.effortMenu.hidden ? null : elements.effortMenu);
+});
+elements.useCustomModel.addEventListener("click", () => chooseModel(elements.customModel.value));
+elements.customModel.addEventListener("keydown", (event) => { if (event.key === "Enter") chooseModel(elements.customModel.value); });
+elements.modelOptions.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-model]");
+  if (button) chooseModel(button.dataset.model).catch((error) => toast(error.message, "error"));
+});
+elements.effortMenu.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-effort]");
+  if (button) chooseEffort(button.dataset.effort).catch((error) => toast(error.message, "error"));
+});
+elements.chatList.addEventListener("click", (event) => {
+  const deleteButton = event.target.closest("[data-delete-chat]");
+  if (deleteButton) { event.stopPropagation(); deleteChat(deleteButton.dataset.deleteChat); return; }
+  const item = event.target.closest("[data-chat-id]");
+  if (item) selectChat(item.dataset.chatId).catch((error) => toast(error.message, "error"));
+});
+elements.fileList.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-delete-file]");
+  if (button) deleteFile(button.dataset.deleteFile);
+});
+elements.messages.addEventListener("click", async (event) => {
+  const codeButton = event.target.closest(".copy-code");
+  if (codeButton) {
+    await navigator.clipboard.writeText(codeButton.closest(".code-block").querySelector("code").textContent);
+    codeButton.textContent = "已复制";
+    setTimeout(() => { codeButton.textContent = "复制"; }, 1200);
+    return;
+  }
+  const messageButton = event.target.closest(".copy-message");
+  if (messageButton) {
+    const id = messageButton.closest("[data-message-id]")?.dataset.messageId;
+    const item = state.current?.messages.find((message) => message.id === id);
+    if (item) { await navigator.clipboard.writeText(item.content); toast("回答已复制"); }
+  }
+});
+elements.empty.addEventListener("click", (event) => {
+  const suggestion = event.target.closest("[data-prompt]");
+  if (suggestion) { elements.input.value = suggestion.dataset.prompt; resizeInput(); elements.input.focus(); }
+});
+elements.form.addEventListener("dragover", (event) => { event.preventDefault(); elements.form.style.borderColor = "#171717"; });
+elements.form.addEventListener("dragleave", () => { elements.form.style.borderColor = ""; });
+elements.form.addEventListener("drop", (event) => { event.preventDefault(); elements.form.style.borderColor = ""; uploadFiles(event.dataTransfer.files); });
+elements.input.addEventListener("paste", (event) => { if (event.clipboardData?.files?.length) uploadFiles(event.clipboardData.files); });
+$$('.close-dialog').forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".popover") && !event.target.closest("#modelButton") && !event.target.closest("#effortButton")) closePopovers();
+});
+document.addEventListener("keydown", (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    createChat().then(() => elements.input.focus()).catch((error) => toast(error.message, "error"));
+  }
+});
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  elements.loginError.textContent = "";
+  try {
+    const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: elements.password.value }) });
+    if (!response.ok) throw new Error((await response.json()).error || "连接失败");
+    elements.loginDialog.close();
+    elements.password.value = "";
+    await bootstrap();
+  } catch (error) { elements.loginError.textContent = error.message; }
+});
+
+resizeInput();
+bootstrap().catch((error) => {
+  console.error(error);
+  toast(error.message, "error");
+});
