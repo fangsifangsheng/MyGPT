@@ -30,7 +30,6 @@ const elements = {
   effortMenu: $("#effortMenu"),
   searchButton: $("#searchButton"),
   searchLabel: $("#searchLabel"),
-  searchMenu: $("#searchMenu"),
   filesDialog: $("#filesDialog"),
   dialogUpload: $("#dialogUploadButton"),
   refreshFiles: $("#refreshFilesButton"),
@@ -318,7 +317,6 @@ function icon(name) {
     download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
     trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
     folder: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10l2 2h5.5A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-11Z"/>',
-    dots: '<path d="M5 12h.01M12 12h.01M19 12h.01"/>',
   };
   return `<svg viewBox="0 0 24 24">${paths[name] || ""}</svg>`;
 }
@@ -341,6 +339,26 @@ function formatElapsed(milliseconds) {
   if (seconds < 60) return `${seconds} 秒`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes} 分 ${seconds % 60} 秒`;
+}
+
+function messageDurationMs(messages, index) {
+  const item = messages[index];
+  if (!item || item.notice) return null;
+  const stored = Number(item.durationMs);
+  if (Number.isFinite(stored) && stored >= 0) return stored;
+  const finishedAt = Date.parse(item.createdAt);
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    if (messages[cursor].role !== "user") continue;
+    const startedAt = Date.parse(messages[cursor].createdAt);
+    return Number.isFinite(startedAt) && Number.isFinite(finishedAt) && finishedAt >= startedAt
+      ? finishedAt - startedAt
+      : null;
+  }
+  return null;
+}
+
+function formatMessageDuration(milliseconds) {
+  return `${Math.max(0, Math.round(milliseconds / 1000))} s`;
 }
 
 function activityHint() {
@@ -374,7 +392,7 @@ function renderChats() {
     <div class="chat-item ${state.current?.id === chat.id ? "active" : ""}" data-chat-id="${escapeHtml(chat.id)}" role="button" tabindex="0">
       <span class="chat-item-title">${escapeHtml(chat.title)}</span>
       ${chat.running ? '<span class="chat-item-running"></span>' : ""}
-      <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话">${icon("dots")}</button>
+      <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话" aria-label="删除对话">${icon("trash")}</button>
     </div>
   `).join("");
 }
@@ -382,11 +400,13 @@ function renderChats() {
 function renderMessages(scroll = false) {
   const messages = state.current?.messages || [];
   elements.empty.hidden = messages.length > 0 || state.running || Boolean(state.streamingText) || Boolean(state.streamError);
-  const html = messages.map((item) => {
+  const html = messages.map((item, index) => {
     if (item.role === "user") {
       return `<article class="message-row user" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-body"><div class="message-content">${inlineMarkdown(item.content).replace(/\n/g, "<br>")}</div></div></div></article>`;
     }
-    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div><div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}</div></div></div></article>`;
+    const durationMs = messageDurationMs(messages, index);
+    const meta = item.notice ? "" : `<div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}${durationMs !== null ? `<span>总计耗时：${formatMessageDuration(durationMs)}</span>` : ""}</div>`;
+    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div>${meta}</div></div></article>`;
   }).join("");
   const streaming = state.streamingText ? `<article class="message-row assistant streaming-message"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(state.streamingText)}<span class="stream-cursor" aria-hidden="true"></span></div></div></div></article>` : "";
   const progressRows = state.progress.slice(-4).map((item) => `<div class="progress-row ${escapeHtml(item.status || "running")}"><span class="progress-mark"></span><div><strong>${escapeHtml(item.label)}</strong>${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}</div></div>`).join("");
@@ -397,9 +417,12 @@ function renderMessages(scroll = false) {
 }
 
 function renderHeader() {
+  const searchEnabled = currentSearchMode() === "on";
   elements.modelName.textContent = currentModel();
   elements.effortLabel.textContent = effortNames[currentEffort()] || currentEffort();
   elements.searchLabel.textContent = `联网搜索：${searchModeNames[currentSearchMode()] || "关"}`;
+  elements.searchButton.classList.toggle("active", searchEnabled);
+  elements.searchButton.setAttribute("aria-pressed", String(searchEnabled));
   elements.fileCount.textContent = String(state.files.length);
   elements.filesButton.disabled = !state.current;
   elements.rename.disabled = !state.current;
@@ -416,10 +439,6 @@ function renderModelMenu() {
 
 function renderEffortMenu() {
   $$("#effortMenu [data-effort]").forEach((button) => button.classList.toggle("active", button.dataset.effort === currentEffort()));
-}
-
-function renderSearchMenu() {
-  $$("#searchMenu [data-search-mode]").forEach((button) => button.classList.toggle("active", button.dataset.searchMode === currentSearchMode()));
 }
 
 function renderFiles() {
@@ -461,7 +480,6 @@ function renderAll(scroll = false) {
   renderHeader();
   renderModelMenu();
   renderEffortMenu();
-  renderSearchMenu();
   renderFiles();
   renderSettings();
 }
@@ -510,7 +528,7 @@ function openSidebar() { document.body.classList.add("sidebar-open"); }
 function closeSidebar() { document.body.classList.remove("sidebar-open"); }
 
 function closePopovers(except = null) {
-  [elements.modelMenu, elements.effortMenu, elements.searchMenu].forEach((menu) => {
+  [elements.modelMenu, elements.effortMenu].forEach((menu) => {
     if (menu !== except) menu.hidden = true;
   });
 }
@@ -623,7 +641,6 @@ async function chooseSearchMode(mode) {
   if (!searchModeNames[mode]) return;
   if (state.current) await updateChat({ webSearchMode: mode });
   else state.draftSearchMode = mode;
-  elements.searchMenu.hidden = true;
   renderAll();
 }
 
@@ -891,13 +908,9 @@ elements.effortButton.addEventListener("click", (event) => {
   elements.effortMenu.hidden = !elements.effortMenu.hidden;
   closePopovers(elements.effortMenu.hidden ? null : elements.effortMenu);
 });
-elements.searchButton.addEventListener("click", (event) => {
-  event.stopPropagation();
-  renderSearchMenu();
-  const rect = elements.searchButton.getBoundingClientRect();
-  elements.searchMenu.style.left = `${Math.max(10, rect.left)}px`;
-  elements.searchMenu.hidden = !elements.searchMenu.hidden;
-  closePopovers(elements.searchMenu.hidden ? null : elements.searchMenu);
+elements.searchButton.addEventListener("click", () => {
+  const nextMode = currentSearchMode() === "on" ? "off" : "on";
+  chooseSearchMode(nextMode).catch((error) => toast(error.message, "error"));
 });
 elements.modelOptions.addEventListener("click", (event) => {
   const button = event.target.closest("[data-model]");
@@ -906,10 +919,6 @@ elements.modelOptions.addEventListener("click", (event) => {
 elements.effortMenu.addEventListener("click", (event) => {
   const button = event.target.closest("[data-effort]");
   if (button) chooseEffort(button.dataset.effort).catch((error) => toast(error.message, "error"));
-});
-elements.searchMenu.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-search-mode]");
-  if (button) chooseSearchMode(button.dataset.searchMode).catch((error) => toast(error.message, "error"));
 });
 elements.chatList.addEventListener("click", (event) => {
   const deleteButton = event.target.closest("[data-delete-chat]");
@@ -948,7 +957,7 @@ elements.form.addEventListener("drop", (event) => { event.preventDefault(); elem
 elements.input.addEventListener("paste", (event) => { if (event.clipboardData?.files?.length) uploadFiles(event.clipboardData.files); });
 $$('.close-dialog').forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 document.addEventListener("click", (event) => {
-  if (!event.target.closest(".popover") && !event.target.closest("#modelButton") && !event.target.closest("#effortButton") && !event.target.closest("#searchButton")) closePopovers();
+  if (!event.target.closest(".popover") && !event.target.closest("#modelButton") && !event.target.closest("#effortButton")) closePopovers();
 });
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {

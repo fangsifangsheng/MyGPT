@@ -601,15 +601,31 @@ async function finishRun(run, status, turnError = null, durationMs = null) {
     stopRunHeartbeat(run);
     activeRuns.delete(run.key);
     const finalText = finalTextForRun(run) || run.sentText.trim();
+    const reportedDurationMs = Number(durationMs);
+    const totalDurationMs = Number.isFinite(reportedDurationMs) && reportedDurationMs >= 0
+      ? reportedDurationMs
+      : Math.max(0, Date.now() - run.startedAt);
+    const completedMessages = [];
     if (finalText) {
-      const assistantMessage = message("assistant", finalText, {
+      completedMessages.push(message("assistant", finalText, {
         model: run.meta.model || null,
+        durationMs: totalDurationMs,
         usage: run.usage || null,
         interrupted: status === "interrupted",
-      });
-      run.meta.messages.push(assistantMessage);
+      }));
+    }
+    if (status === "interrupted") {
+      completedMessages.push(message("assistant", "记录已保存，继续即可", {
+        interrupted: true,
+        notice: true,
+      }));
+    }
+    if (completedMessages.length) {
+      run.meta.messages.push(...completedMessages);
       await writeMeta(run.meta);
-      ndjson(run.res, { type: "assistant.message", message: assistantMessage });
+      for (const assistantMessage of completedMessages) {
+        ndjson(run.res, { type: "assistant.message", message: assistantMessage });
+      }
     }
 
     if (status === "interrupted") {
@@ -622,7 +638,7 @@ async function finishRun(run, status, turnError = null, durationMs = null) {
         error: "Codex 已结束本轮，但没有返回可展示的回答正文。请重试，或换一种更明确的提问方式。",
       });
     }
-    ndjson(run.res, { type: "done", status, durationMs, usage: run.usage || null });
+    ndjson(run.res, { type: "done", status, durationMs: totalDurationMs, usage: run.usage || null });
     run.res.end();
   })().catch((error) => {
     ndjson(run.res, { type: "error", error: error.message });
