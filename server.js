@@ -408,8 +408,16 @@ const upload = multer({
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 30 },
 });
 
+function decodeMultipartFileName(value) {
+  const original = String(value || "");
+  if (!original || [...original].some((char) => char.codePointAt(0) > 0xff)) return original;
+  const decoded = Buffer.from(original, "latin1").toString("utf8");
+  if (decoded.includes("\ufffd")) return original;
+  return Buffer.from(decoded, "utf8").toString("latin1") === original ? decoded : original;
+}
+
 function safeFileName(original) {
-  const base = path.basename(String(original || ""));
+  const base = path.basename(decodeMultipartFileName(original));
   return base.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").trim().slice(0, 180) || "file";
 }
 
@@ -426,6 +434,28 @@ async function availablePath(directory, filename) {
     }
   }
 }
+
+async function repairMojibakeFileNames(directory = USERS_ROOT) {
+  let repaired = 0;
+  const entries = await fs.readdir(directory, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === ".localgpt") continue;
+    const source = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      repaired += await repairMojibakeFileNames(source);
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const decoded = safeFileName(entry.name);
+    if (decoded === entry.name) continue;
+    const destination = await availablePath(directory, decoded);
+    await fs.rename(source, destination);
+    repaired += 1;
+  }
+  return repaired;
+}
+
+const repairedFileNames = await repairMojibakeFileNames();
 
 app.post("/api/chats/:id/files", upload.array("files", 30), async (req, res, next) => {
   try {
@@ -815,5 +845,6 @@ app.listen(PORT, HOST, () => {
     if (!configuredPassword) console.log("提示: 本次密码为随机生成，重启后会变化。可设置 LOCALGPT_PASSWORD 固定密码。");
   }
   console.log(`会话目录: ${DATA_ROOT}\n`);
+  if (repairedFileNames) console.log(`已修复乱码文件名: ${repairedFileNames} 个`);
   console.log(`Codex 网络: 已启用，Web Search: live，代理: ${proxyLabel(codexEnvironment.proxyUrl)}\n`);
 });

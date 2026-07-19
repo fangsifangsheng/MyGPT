@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "chat-20260719-114558-a3d1",
+  "userRole": "zl",
+  "title": "比特币现在价格多少",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "medium",
+  "codexThreadId": "019f7a32-89c5-75d0-a519-a036991585b3",
+  "createdAt": "2026-07-19T11:45:58.260Z",
+  "updatedAt": "2026-07-19T11:46:05.593Z",
+  "messages": [
+    {
+      "id": "014a45a2-de57-4369-a170-cef98c7ffcc4",
+      "role": "user",
+      "content": "比特币现在价格多少",
+      "createdAt": "2026-07-19T11:46:00.084Z"
+    }
+  ]
+}
