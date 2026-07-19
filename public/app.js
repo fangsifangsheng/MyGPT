@@ -25,8 +25,6 @@ const elements = {
   modelName: $("#topModelName"),
   modelMenu: $("#modelMenu"),
   modelOptions: $("#modelOptions"),
-  customModel: $("#customModelInput"),
-  useCustomModel: $("#useCustomModelButton"),
   effortButton: $("#effortButton"),
   effortLabel: $("#effortLabel"),
   effortMenu: $("#effortMenu"),
@@ -51,7 +49,7 @@ const elements = {
 };
 
 const effortNames = { low: "快速", medium: "标准", high: "深入", xhigh: "最深" };
-const searchModeNames = { default: "默认", on: "开", off: "关" };
+const searchModeNames = { on: "开", off: "关" };
 const state = {
   config: null,
   chats: [],
@@ -356,7 +354,7 @@ function activityHint() {
 }
 
 function currentModel() {
-  return state.current?.model || state.draftModel || state.config?.defaultModel || "Codex 默认模型";
+  return state.config?.defaultModel || "gpt-5.6-sol";
 }
 
 function currentEffort() {
@@ -414,7 +412,6 @@ function renderModelMenu() {
   elements.modelOptions.innerHTML = models.map((model) => `
     <button class="model-option ${currentModel() === model ? "active" : ""}" type="button" data-model="${escapeHtml(model)}">${escapeHtml(model)}</button>
   `).join("");
-  elements.customModel.value = models.includes(currentModel()) ? "" : currentModel();
 }
 
 function renderEffortMenu() {
@@ -587,7 +584,7 @@ async function createChat() {
   if (state.running) throw new Error("请先停止当前回答，再新建对话");
   const chat = await api("/api/chats", {
     method: "POST",
-    body: JSON.stringify({ model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
+    body: JSON.stringify({ model: currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
   });
   await loadChats();
   await selectChat(chat.id);
@@ -607,10 +604,7 @@ async function updateChat(values) {
 
 async function chooseModel(model) {
   if (state.running) throw new Error("请等待当前回答结束后再切换模型");
-  model = String(model || "").trim();
-  if (!model) return;
-  if (state.current) await updateChat({ model });
-  else state.draftModel = model;
+  if (String(model || "").trim() !== currentModel()) return;
   elements.modelMenu.hidden = true;
   renderAll();
 }
@@ -696,7 +690,7 @@ async function sendMessage() {
     const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
+      body: JSON.stringify({ content, model: currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
     });
     if (response.status === 401) { showLogin(); throw new Error("需要访问密码"); }
     if (!response.ok || !response.body) {
@@ -905,8 +899,6 @@ elements.searchButton.addEventListener("click", (event) => {
   elements.searchMenu.hidden = !elements.searchMenu.hidden;
   closePopovers(elements.searchMenu.hidden ? null : elements.searchMenu);
 });
-elements.useCustomModel.addEventListener("click", () => chooseModel(elements.customModel.value));
-elements.customModel.addEventListener("keydown", (event) => { if (event.key === "Enter") chooseModel(elements.customModel.value); });
 elements.modelOptions.addEventListener("click", (event) => {
   const button = event.target.closest("[data-model]");
   if (button) chooseModel(button.dataset.model).catch((error) => toast(error.message, "error"));

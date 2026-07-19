@@ -12,6 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(process.env.LOCALGPT_DATA_DIR || path.join(__dirname, "chats"));
 const USERS_ROOT = path.join(DATA_ROOT, "users");
 const PORT = Number(process.env.LOCALGPT_PORT || 4317);
+const MODEL_ID = "gpt-5.6-sol";
 const LAN_MODE = process.argv.includes("--lan") || process.env.LOCALGPT_LAN === "1";
 const HOST = process.env.LOCALGPT_HOST || (LAN_MODE ? "0.0.0.0" : "127.0.0.1");
 const MAX_UPLOAD_MB = Number(process.env.LOCALGPT_MAX_UPLOAD_MB || 100);
@@ -72,125 +73,22 @@ function proxyLabel(value) {
   }
 }
 
-const EXPLICIT_NEWS_PATTERN = /新闻|近况|热搜|热点|事件|消息|故事|怎么回事|发生了什么/;
-const RECENT_NEWS_PATTERN = /最新|最近|近期|刚刚/;
-const NEWS_REQUEST_PATTERN = /锐评|讲讲|说说|聊聊|介绍|分析|评价|点评|解读|发生|人物|夫妇/;
-
-function shouldPrefetchLiveNews(value) {
-  const text = String(value || "");
-  const newsRequest = EXPLICIT_NEWS_PATTERN.test(text)
-    || (RECENT_NEWS_PATTERN.test(text) && NEWS_REQUEST_PATTERN.test(text));
-  if (!newsRequest || /https?:\/\//i.test(text)) return false;
-  return !/价格|行情|天气|汇率|股价|币价/.test(text);
-}
-
-function newsQueryFromPrompt(value) {
-  const original = String(value || "").trim();
-  const query = original
-    .replace(/https?:\/\/\S+/gi, " ")
-    .replace(/锐评|讲讲|说说|聊聊|介绍|分析|评价|点评|解读|告诉我|帮我|请|一下|最新|最近|近期|目前|现在|近况|新闻|消息|故事|怎么回事|发生了什么|的/gu, " ")
-    .replace(/[\p{P}\p{S}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return (query.length >= 2 ? query : original).slice(0, 100);
-}
-
-function isShortContinuation(value) {
-  const text = String(value || "").replace(/[\s，。！？,.!?]/g, "");
-  return text.length <= 24 && /继续|接着|往下说|然后呢|还在吗/.test(text);
-}
-
-function liveNewsPromptForTurn(meta, content) {
-  if (!isShortContinuation(content)) return content;
-  return [...(meta.messages || [])]
-    .reverse()
-    .find((item) => item.role === "user" && !isShortContinuation(item.content))?.content || content;
-}
-
-function decodeXmlEntities(value) {
-  const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
-  return String(value || "")
-    .replace(/^<!\[CDATA\[|\]\]>$/g, "")
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number.parseInt(code, 10)))
-    .replace(/&(amp|lt|gt|quot|apos);/g, (_, name) => named[name]);
-}
-
-function rssValue(block, tag) {
-  const match = String(block || "").match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, "i"));
-  return decodeXmlEntities(match?.[1] || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function webQueryFromPrompt(value) {
-  const original = String(value || "").trim();
-  const query = original
-    .replace(/https?:\/\/\S+/gi, " ")
-    .replace(/锐评|讲讲|说说|聊聊|介绍|分析|评价|点评|解读|告诉我|帮我|请|一下|最新|最近|近期|目前|现在|近况|新闻|消息|故事|怎么回事|发生了什么|的/gu, " ")
-    .replace(/[\p{P}\p{S}]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return (query.length >= 2 ? query : original).slice(0, 120);
-}
-
 function normalizeWebSearchMode(value) {
   const mode = String(value || "off").toLowerCase();
-  return ["default", "on", "off"].includes(mode) ? mode : "off";
-}
-
-function searchContextLabel(mode, isNews) {
-  if (mode === "on") return isNews ? "[MyGPT forced live news context]" : "[MyGPT forced live web context]";
-  return "[MyGPT live news context]";
-}
-
-async function buildLiveNewsContext(content, { force = false } = {}) {
-  const isNews = shouldPrefetchLiveNews(content);
-  if (!force && !isNews) return "";
-  const query = force && !isNews ? webQueryFromPrompt(content) : newsQueryFromPrompt(content);
-  const searchUrl = force && !isNews
-    ? `https://www.bing.com/search?format=rss&q=${encodeURIComponent(query)}`
-    : `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans`;
-  const response = await fetch(searchUrl, {
-    headers: {
-      Accept: "application/rss+xml, application/xml, text/xml",
-      "User-Agent": "MyGPT/0.3.2",
-    },
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!response.ok) throw new Error(`联网搜索返回 HTTP ${response.status}`);
-  const xml = await response.text();
-  const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)]
-    .slice(0, 10)
-    .map((match) => ({
-      title: rssValue(match[1], "title"),
-      source: rssValue(match[1], "source"),
-      publishedAt: rssValue(match[1], "pubDate"),
-      link: rssValue(match[1], "link"),
-      description: rssValue(match[1], "description"),
-    }))
-    .filter((item) => item.title && item.link);
-  if (!items.length) return "";
-  const results = items.map((item, index) => [
-    `${index + 1}. ${item.title}`,
-    item.source ? `Source: ${item.source}` : "",
-    item.publishedAt ? `Published: ${item.publishedAt}` : "",
-    item.description ? `Summary: ${item.description}` : "",
-    `Link: ${item.link}`,
-  ].filter(Boolean).join("\n")).join("\n\n");
-  return `${searchContextLabel(force ? "on" : "default", isNews)}\nFetched at: ${new Date().toISOString()}\nSearch query: ${query}\nSearch feed: ${searchUrl}\n\n${results}\n\nThese are search-result leads, not automatically verified facts. Cross-check repeated details, attribute allegations and opinions to their sources, and clearly distinguish confirmed facts from commentary.`;
+  return ["on", "off"].includes(mode) ? mode : "off";
 }
 
 const codexEnvironment = makeCodexEnvironment();
 const CHAT_DEVELOPER_INSTRUCTIONS = `You are being used through MyGPT as a general chat assistant.
 Always provide a complete, self-contained final answer in the chat, even when you used tools or changed files.
-Honor the per-turn [MyGPT search mode] input. Mode off overrides all later search instructions: do not use web_search or any network command. Mode on requires a live search and source links. Mode default lets you decide whether current information requires search.
+Honor the per-turn [MyGPT search mode] input. Mode off overrides all later search instructions: do not use any network command. Mode on allows network research when the request needs current or external information; do not search when it is unnecessary.
 When the user asks for code, include the complete requested code in fenced code blocks in the final answer. Never replace the answer with only a statement that code was written to a file.
 Prefer answering in chat. Do not create or modify files unless the user explicitly asks for file changes or file creation.
 Uploaded files in the workspace may be read when relevant. Summarize findings and results in the final answer.
 Use concise progress updates during longer work, then give the full result. Respond in the user's language.
-If an input item begins with [MyGPT live news context], [MyGPT forced live news context], or [MyGPT forced live web context], use those structured UTF-8 search results immediately. Do not repeat Google or Bing HTML scraping through shell commands unless the supplied results are genuinely insufficient. Search results are leads rather than proof: compare multiple sources, attribute allegations and opinions, avoid presenting sensational claims as established facts, and include useful source links in the final answer.
-For questions that depend on current information (prices, weather, news, exchange rates, live service status, or today's data), use any supplied MyGPT live context first when present; it already satisfies the initial search requirement for that turn. When no such context is supplied and search mode is not off, you MUST use the built-in live web search before any shell command or direct HTTP request. Do not use PowerShell, curl, or Node.js to query websites or APIs first. If the web search tool explicitly fails or is unavailable, immediately run Node.js 24's built-in global fetch as the fallback. In the same PowerShell command that launches Node, explicitly set NODE_USE_ENV_PROXY=1 and set HTTP_PROXY, HTTPS_PROXY, and ALL_PROXY from PROXY_URL (or http://127.0.0.1:10809 when PROXY_URL is empty) before invoking node. Do not import or require undici, ProxyAgent, proxy-agent, or any third-party package. Do not use PowerShell for HTTP unless both built-in web search and the proxy-enabled built-in Node.js fetch have failed. Do not stop at "web search is unavailable" and do not claim that current information cannot be retrieved until the proxy-backed Node.js fallback has been attempted. Cite the source time or URL in the final answer.
+When search mode is on and current or external information is needed, invoke Node.js 24's built-in global fetch through the shell with the configured proxy to retrieve and cross-check reliable public sources. Set NODE_USE_ENV_PROXY=1 and pass HTTP_PROXY, HTTPS_PROXY, and ALL_PROXY from PROXY_URL (or http://127.0.0.1:10809 when PROXY_URL is empty) in the same command. Do not use web_search, PowerShell, curl, or another HTTP client. Cite useful source links. Do not claim that live lookup is unavailable before attempting this Node.js path.
 On Windows, use the native PowerShell host directly. Do not wrap commands in cmd.exe /c or another powershell.exe -Command unless a .cmd/.bat file or CMD built-in genuinely requires it. Keep command syntax consistently PowerShell so quotes, pipes, dollar signs, and parentheses are parsed only once.
-When a shell command must make an HTTP(S) request, prefer Node.js 24's built-in global fetch because it inherits the configured proxy. Do not use Get-Date -AsUTC because Windows PowerShell 5.1 does not support it; use [DateTime]::UtcNow instead. If PowerShell is used only after the preferred options failed, pass the proxy explicitly, for example: Invoke-RestMethod -Uri $url -Proxy $env:PROXY_URL. Do not rely on HTTP_PROXY environment-variable autodetection in Windows PowerShell. If PowerShell or curl fails with a TLS/Schannel error, stop retrying that client and use Node.js global fetch instead.
+When a shell command must make an HTTP(S) request, use only Node.js 24's built-in global fetch with the configured proxy. Do not use PowerShell, curl, undici, ProxyAgent, proxy-agent, or another HTTP client.
 Use standard Markdown tables without blank lines between table rows. Write math with LaTeX delimiters \\( ... \\) for inline formulas and \\[ ... \\] for display formulas so MyGPT can render it cleanly.`;
 const codexAppServer = new CodexAppServer({
   command: CODEX_COMMAND,
@@ -339,6 +237,7 @@ function metaPath(id, role) {
 
 async function readMeta(id, role) {
   const meta = JSON.parse(await fs.readFile(metaPath(id, role), "utf8"));
+  meta.model = MODEL_ID;
   meta.webSearchMode = normalizeWebSearchMode(meta.webSearchMode);
   return meta;
 }
@@ -404,16 +303,11 @@ function readCodexDefaults() {
     // Codex will choose its own defaults.
   }
   const get = (key) => config.match(new RegExp(`^\\s*${key}\\s*=\\s*\"([^\"]+)\"`, "m"))?.[1];
-  return { model: get("model") || "", reasoningEffort: get("model_reasoning_effort") || "medium" };
+  return { model: MODEL_ID, reasoningEffort: get("model_reasoning_effort") || "medium" };
 }
 
-const codexDefaults = { ...readCodexDefaults(), reasoningEffort: "medium" };
-const suggestedModels = [...new Set([
-  codexDefaults.model,
-  "gpt-5.6-sol",
-  "gpt-5.6-terra",
-  "gpt-5.6-luna",
-].filter(Boolean))];
+const codexDefaults = { ...readCodexDefaults(), model: MODEL_ID, reasoningEffort: "medium" };
+const suggestedModels = [MODEL_ID];
 
 app.get("/api/config", (req, res) => {
   res.json({
@@ -422,7 +316,7 @@ app.get("/api/config", (req, res) => {
     host: HOST,
     port: PORT,
     lanMode: LAN_MODE,
-    defaultModel: codexDefaults.model,
+    defaultModel: MODEL_ID,
     defaultReasoningEffort: codexDefaults.reasoningEffort,
     defaultWebSearchMode: "off",
     suggestedModels,
@@ -447,7 +341,7 @@ app.post("/api/chats", async (req, res, next) => {
       id,
       userRole,
       title: cleanTitle(req.body.title),
-      model: String(req.body.model || codexDefaults.model || ""),
+      model: MODEL_ID,
       reasoningEffort: String(req.body.reasoningEffort || codexDefaults.reasoningEffort || "medium"),
       webSearchMode: normalizeWebSearchMode(req.body.webSearchMode),
       codexThreadId: null,
@@ -474,7 +368,7 @@ app.patch("/api/chats/:id", async (req, res, next) => {
     const userRole = requestRole(req);
     const meta = await readMeta(req.params.id, userRole);
     if (req.body.title !== undefined) meta.title = cleanTitle(req.body.title);
-    if (req.body.model !== undefined) meta.model = String(req.body.model).trim();
+    meta.model = MODEL_ID;
     if (req.body.reasoningEffort !== undefined) meta.reasoningEffort = normalizeEffort(req.body.reasoningEffort);
     if (req.body.webSearchMode !== undefined) meta.webSearchMode = normalizeWebSearchMode(req.body.webSearchMode);
     if (req.body.resetThread === true && !activeRuns.has(runKey(userRole, meta.id))) meta.codexThreadId = null;
@@ -852,7 +746,7 @@ async function openCodexThread(run) {
     developerInstructions: CHAT_DEVELOPER_INSTRUCTIONS,
     config: {
       model_reasoning_effort: normalizeEffort(run.meta.reasoningEffort),
-      web_search: normalizeWebSearchMode(run.meta.webSearchMode) === "off" ? "disabled" : "live",
+      web_search: "disabled",
     },
   };
   let result;
@@ -888,11 +782,10 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
     if (!content) return res.status(400).json({ error: "消息不能为空" });
     if (content.length > 100_000) return res.status(413).json({ error: "消息过长" });
 
-    if (req.body.model !== undefined) meta.model = String(req.body.model).trim();
+    meta.model = MODEL_ID;
     if (req.body.reasoningEffort !== undefined) meta.reasoningEffort = normalizeEffort(req.body.reasoningEffort);
     if (req.body.webSearchMode !== undefined) meta.webSearchMode = normalizeWebSearchMode(req.body.webSearchMode);
     if (meta.messages.length === 0 && meta.title === "新对话") meta.title = cleanTitle(content.slice(0, 42));
-    const liveNewsPrompt = liveNewsPromptForTurn(meta, content);
     const userMessage = message("user", content);
     meta.messages.push(userMessage);
     await writeMeta(meta);
@@ -927,26 +820,16 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
 
     await openCodexThread(run);
     runProgress(run, "ready", "Codex 已连接，正在提交问题");
-    let liveNewsContext = "";
-    if (meta.webSearchMode !== "off") {
-      try {
-        liveNewsContext = await buildLiveNewsContext(liveNewsPrompt, { force: meta.webSearchMode === "on" });
-        if (liveNewsContext) runProgress(run, "search", meta.webSearchMode === "on" ? "已强制联网搜索" : "已获取实时新闻线索", meta.webSearchMode === "on" ? webQueryFromPrompt(liveNewsPrompt) : newsQueryFromPrompt(liveNewsPrompt), "completed");
-      } catch (error) {
-        runProgress(run, "warning", "联网搜索预取失败，Codex 将继续尝试", error.message, "warning");
-      }
-    }
     const result = await codexAppServer.request("turn/start", {
       threadId: run.threadId,
       clientUserMessageId: userMessage.id,
       input: [
         { type: "text", text: content, text_elements: [] },
-        { type: "text", text: `[MyGPT search mode: ${meta.webSearchMode}] ${meta.webSearchMode === "on" ? "必须联网检索并引用来源；若预取结果不足，继续使用 Codex web_search。" : meta.webSearchMode === "off" ? "禁止联网搜索、web_search、PowerShell/curl/Node 网络请求；仅使用已有知识和本地文件。" : "联网由模型按需决定；需要实时信息时使用 web_search。"}`, text_elements: [] },
-        ...(liveNewsContext ? [{ type: "text", text: liveNewsContext, text_elements: [] }] : []),
+        { type: "text", text: `[MyGPT search mode: ${meta.webSearchMode}] ${meta.webSearchMode === "on" ? "允许联网；请自行判断当前问题是否需要实时或外部信息。需要时只通过已配置代理的 Node.js global fetch 检索并交叉核验可靠公开来源，引用实际使用的来源链接。不要调用 web_search、PowerShell 或 curl。" : "禁止联网搜索以及 PowerShell/curl/Node 网络请求；仅使用已有知识和本地文件。"}`, text_elements: [] },
       ],
       cwd: chatDir(meta.id, userRole),
       approvalPolicy: "never",
-      model: meta.model || null,
+      model: MODEL_ID,
       effort: normalizeEffort(meta.reasoningEffort),
     }, 60000);
     run.turnId = result.turn.id;
@@ -1006,5 +889,5 @@ app.listen(PORT, HOST, () => {
   }
   console.log(`会话目录: ${DATA_ROOT}\n`);
   if (repairedFileNames) console.log(`已修复乱码文件名: ${repairedFileNames} 个`);
-  console.log(`Codex 网络: 已启用，Web Search: live，代理: ${proxyLabel(codexEnvironment.proxyUrl)}\n`);
+  console.log(`Codex 网络: 由会话开关控制，按需使用代理网络请求，代理: ${proxyLabel(codexEnvironment.proxyUrl)}\n`);
 });

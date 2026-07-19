@@ -1,4 +1,6 @@
 node_modules/
+/chats/
+/.tmp-codex-schema/
 .localgpt-data/
 .smoke-data/
 .smoke-lan-data/

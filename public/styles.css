@@ -285,11 +285,6 @@ svg {
 .model-option, .effort-menu > button, .search-menu > button { width: 100%; min-height: 42px; border: 0; background: transparent; border-radius: 8px; text-align: left; cursor: pointer; padding: 7px 9px; display: flex; align-items: center; }
 .model-option:hover, .effort-menu > button:hover, .search-menu > button:hover { background: var(--surface); }
 .model-option.active::after { content: "✓"; margin-left: auto; }
-.custom-model { display: block; border-top: 1px solid var(--line); margin-top: 5px; padding: 10px 8px 5px; }
-.custom-model > span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 7px; }
-.custom-model > div { display: flex; gap: 5px; }
-.custom-model input { min-width: 0; flex: 1; border: 1px solid var(--line); border-radius: 7px; padding: 7px 8px; outline: 0; }
-.custom-model button { border: 0; background: var(--dark); color: #fff; border-radius: 7px; padding: 0 10px; cursor: pointer; }
 .effort-menu, .search-menu { width: 230px; bottom: 145px; }
 .effort-menu > button, .search-menu > button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .effort-menu span, .search-menu span { font-weight: 570; }
