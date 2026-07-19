@@ -128,6 +128,14 @@ svg {
   scrollbar-width: thin;
 }
 
+.chat-month-heading { width: 100%; min-height: 32px; display: flex; align-items: center; gap: 7px; padding: 7px 7px 5px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.chat-month-heading.latest { cursor: default; }
+.chat-month-heading:not(.latest):hover { color: var(--text); }
+.chat-month-line { flex: 1 1 auto; height: 1px; background: var(--line); }
+.chat-month-label { flex: 0 0 auto; font-size: 11px; line-height: 1; white-space: nowrap; }
+.chat-month-heading svg { width: 13px; height: 13px; flex: 0 0 13px; transition: transform .16s ease; }
+.chat-month-heading[aria-expanded="true"] svg { transform: rotate(90deg); }
+
 .chat-item {
   position: relative;
   display: flex;
@@ -226,7 +234,9 @@ svg {
 .copy-code { border: 0; color: #d8d8d8; background: transparent; cursor: pointer; font-size: 11px; }
 .code-block pre { margin: 0; padding: 14px; overflow-x: auto; }
 .code-block code { background: transparent; padding: 0; color: inherit; white-space: pre; }
-.message-meta { display: flex; align-items: center; gap: 5px; margin-top: 8px; color: var(--faint); font-size: 11px; }
+.message-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 5px; margin-top: 8px; color: var(--faint); font-size: 11px; }
+.message-duration, .message-date { white-space: nowrap; }
+.message-date { margin-left: 12px; }
 .message-action { width: 28px; height: 28px; border: 0; background: transparent; color: var(--muted); border-radius: 6px; cursor: pointer; display: inline-grid; place-items: center; }
 .message-action:hover { background: var(--surface); color: var(--text); }
 .message-action svg { width: 16px; height: 16px; }

@@ -67,6 +67,7 @@ const state = {
   draftModel: "",
   draftEffort: "medium",
   draftSearchMode: "off",
+  collapsedChatMonths: new Set(),
   booted: false,
 };
 
@@ -316,6 +317,7 @@ function icon(name) {
     file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/>',
     download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
     trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
+    chevron: '<path d="m9 18 6-6-6-6"/>',
     folder: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H10l2 2h5.5A2.5 2.5 0 0 1 20 7.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5v-11Z"/>',
   };
   return `<svg viewBox="0 0 24 24">${paths[name] || ""}</svg>`;
@@ -361,6 +363,44 @@ function formatMessageDuration(milliseconds) {
   return `${Math.max(0, Math.round(milliseconds / 1000))} s`;
 }
 
+function beijingDateParts(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  const year = get("year");
+  const month = get("month")?.padStart(2, "0");
+  const day = get("day")?.padStart(2, "0");
+  return year && month && day ? { year, month, day } : null;
+}
+
+function formatBeijingDate(value) {
+  const parts = beijingDateParts(value);
+  return parts ? `${parts.year}年${parts.month}月${parts.day}日` : "";
+}
+
+function chatMonth(value) {
+  const parts = beijingDateParts(value);
+  return parts
+    ? { key: `${parts.year}-${parts.month}`, label: `${parts.year}年${Number(parts.month)}月` }
+    : { key: "unknown", label: "未知月份" };
+}
+
+function chatsByMonth(chats) {
+  const groups = new Map();
+  for (const chat of chats) {
+    const month = chatMonth(chat.updatedAt || chat.createdAt);
+    if (!groups.has(month.key)) groups.set(month.key, { ...month, chats: [] });
+    groups.get(month.key).chats.push(chat);
+  }
+  return [...groups.values()];
+}
+
 function activityHint() {
   const quietFor = Date.now() - (state.lastActivityAt || Date.now());
   const connectionAlive = state.lastHeartbeatAt && Date.now() - state.lastHeartbeatAt < 25000;
@@ -388,13 +428,21 @@ function renderChats() {
     elements.chatList.innerHTML = '<div class="empty-list" style="min-height:100px;font-size:12px">还没有对话</div>';
     return;
   }
-  elements.chatList.innerHTML = state.chats.map((chat) => `
-    <div class="chat-item ${state.current?.id === chat.id ? "active" : ""}" data-chat-id="${escapeHtml(chat.id)}" role="button" tabindex="0">
-      <span class="chat-item-title">${escapeHtml(chat.title)}</span>
-      ${chat.running ? '<span class="chat-item-running"></span>' : ""}
-      <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话" aria-label="删除对话">${icon("trash")}</button>
-    </div>
-  `).join("");
+  elements.chatList.innerHTML = chatsByMonth(state.chats).map((group, index) => {
+    const latest = index === 0;
+    const collapsed = !latest && state.collapsedChatMonths.has(group.key);
+    const heading = latest
+      ? `<div class="chat-month-heading latest"><span class="chat-month-line"></span><span class="chat-month-label">${escapeHtml(group.label)}</span><span class="chat-month-line"></span></div>`
+      : `<button class="chat-month-heading" type="button" data-chat-month="${escapeHtml(group.key)}" aria-expanded="${String(!collapsed)}"><span class="chat-month-line"></span><span class="chat-month-label">${escapeHtml(group.label)}</span>${icon("chevron")}<span class="chat-month-line"></span></button>`;
+    const chats = collapsed ? "" : group.chats.map((chat) => `
+      <div class="chat-item ${state.current?.id === chat.id ? "active" : ""}" data-chat-id="${escapeHtml(chat.id)}" role="button" tabindex="0">
+        <span class="chat-item-title">${escapeHtml(chat.title)}</span>
+        ${chat.running ? '<span class="chat-item-running"></span>' : ""}
+        <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话" aria-label="删除对话">${icon("trash")}</button>
+      </div>
+    `).join("");
+    return heading + chats;
+  }).join("");
 }
 
 function renderMessages(scroll = false) {
@@ -405,7 +453,8 @@ function renderMessages(scroll = false) {
       return `<article class="message-row user" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-body"><div class="message-content">${inlineMarkdown(item.content).replace(/\n/g, "<br>")}</div></div></div></article>`;
     }
     const durationMs = messageDurationMs(messages, index);
-    const meta = item.notice ? "" : `<div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}${durationMs !== null ? `<span>总计耗时：${formatMessageDuration(durationMs)}</span>` : ""}</div>`;
+    const beijingDate = formatBeijingDate(item.createdAt);
+    const meta = item.notice ? "" : `<div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}${durationMs !== null ? `<span class="message-duration">总计耗时：${formatMessageDuration(durationMs)}</span>` : ""}${beijingDate ? `<span class="message-date">日期:${escapeHtml(beijingDate)}</span>` : ""}</div>`;
     return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div>${meta}</div></div></article>`;
   }).join("");
   const streaming = state.streamingText ? `<article class="message-row assistant streaming-message"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(state.streamingText)}<span class="stream-cursor" aria-hidden="true"></span></div></div></div></article>` : "";
@@ -921,6 +970,14 @@ elements.effortMenu.addEventListener("click", (event) => {
   if (button) chooseEffort(button.dataset.effort).catch((error) => toast(error.message, "error"));
 });
 elements.chatList.addEventListener("click", (event) => {
+  const monthButton = event.target.closest("[data-chat-month]");
+  if (monthButton) {
+    const key = monthButton.dataset.chatMonth;
+    if (state.collapsedChatMonths.has(key)) state.collapsedChatMonths.delete(key);
+    else state.collapsedChatMonths.add(key);
+    renderChats();
+    return;
+  }
   const deleteButton = event.target.closest("[data-delete-chat]");
   if (deleteButton) { event.stopPropagation(); deleteChat(deleteButton.dataset.deleteChat); return; }
   const item = event.target.closest("[data-chat-id]");
