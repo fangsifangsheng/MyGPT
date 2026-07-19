@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "chat-20260719-132031-2e84",
+  "userRole": "phonezl",
+  "title": "今天星期几，今天出生什么星座",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "low",
+  "codexThreadId": "019f7a89-9829-78a2-b76f-84d1b91411fe",
+  "createdAt": "2026-07-19T13:20:31.475Z",
+  "updatedAt": "2026-07-19T13:21:25.828Z",
+  "messages": [
+    {
+      "id": "c1061ad7-5114-4ee0-9cd3-715a0936d189",
+      "role": "user",
+      "content": "今天星期几，今天出生什么星座",
+      "createdAt": "2026-07-19T13:21:05.558Z"
+    },
+    {
+      "id": "d1cbaabe-6a56-49f4-aa3f-87b53d863136",
+      "role": "assistant",
+      "content": "今天是星期日（2026年7月19日）。\n\n今天出生的人是巨蟹座（6月22日—7月22日）。",
+      "createdAt": "2026-07-19T13:21:25.828Z",
+      "model": "gpt-5.6-luna",
+      "usage": {
+        "total": {
+          "totalTokens": 18087,
+          "inputTokens": 17982,
+          "cachedInputTokens": 3840,
+          "outputTokens": 105,
+          "reasoningOutputTokens": 67
+        },
+        "last": {
+          "totalTokens": 18087,
+          "inputTokens": 17982,
+          "cachedInputTokens": 3840,
+          "outputTokens": 105,
+          "reasoningOutputTokens": 67
+        },
+        "modelContextWindow": 258400
+      },
+      "interrupted": false
+    }
+  ]
+}

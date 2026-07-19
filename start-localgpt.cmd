@@ -7,6 +7,12 @@ set "LOCALGPT_PID_FILE=%~dp0.localgpt.pid"
 set "LOCALGPT_LOG_DIR=%~dp0logs"
 set "LOCALGPT_MODE=local"
 if not defined LOCALGPT_PROXY_URL set "LOCALGPT_PROXY_URL=http://127.0.0.1:10809"
+if not defined PROXY_URL set "PROXY_URL=%LOCALGPT_PROXY_URL%"
+if not defined HTTP_PROXY set "HTTP_PROXY=%PROXY_URL%"
+if not defined HTTPS_PROXY set "HTTPS_PROXY=%PROXY_URL%"
+if not defined ALL_PROXY set "ALL_PROXY=%PROXY_URL%"
+if not defined NO_PROXY set "NO_PROXY=localhost,127.0.0.1,::1"
+if not defined NODE_USE_ENV_PROXY set "NODE_USE_ENV_PROXY=1"
 if /I "%~1"=="lan" set "LOCALGPT_MODE=lan"
 
 if exist "%LOCALGPT_PID_FILE%" (

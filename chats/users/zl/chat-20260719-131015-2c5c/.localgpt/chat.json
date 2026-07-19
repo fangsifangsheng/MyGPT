@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "id": "chat-20260719-131015-2c5c",
+  "userRole": "zl",
+  "title": "锐评讲讲最新的邹市明的故事",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "low",
+  "codexThreadId": "019f7a94-e9b1-7252-a5b9-8185a6ca0ce3",
+  "createdAt": "2026-07-19T13:10:15.491Z",
+  "updatedAt": "2026-07-19T13:38:34.522Z",
+  "messages": [
+    {
+      "id": "d7055390-96dc-4c1e-a37c-9dc92cb573cd",
+      "role": "user",
+      "content": "锐评讲讲最新的邹市明的故事",
+      "createdAt": "2026-07-19T13:33:27.330Z"
+    },
+    {
+      "id": "ca3cfe10-f3a3-4c9e-a182-e6477723eb42",
+      "role": "user",
+      "content": "你还在吗，继续",
+      "createdAt": "2026-07-19T13:38:34.522Z"
+    }
+  ]
+}

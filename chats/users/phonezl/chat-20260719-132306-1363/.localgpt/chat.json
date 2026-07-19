@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "chat-20260719-132306-1363",
+  "userRole": "phonezl",
+  "title": "新对话",
+  "model": "gpt-5.6-luna",
+  "reasoningEffort": "low",
+  "codexThreadId": null,
+  "createdAt": "2026-07-19T13:23:06.380Z",
+  "updatedAt": "2026-07-19T13:23:06.380Z",
+  "messages": []
+}

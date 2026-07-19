@@ -30,6 +30,9 @@ const elements = {
   effortButton: $("#effortButton"),
   effortLabel: $("#effortLabel"),
   effortMenu: $("#effortMenu"),
+  searchButton: $("#searchButton"),
+  searchLabel: $("#searchLabel"),
+  searchMenu: $("#searchMenu"),
   filesDialog: $("#filesDialog"),
   dialogUpload: $("#dialogUploadButton"),
   refreshFiles: $("#refreshFilesButton"),
@@ -48,6 +51,7 @@ const elements = {
 };
 
 const effortNames = { low: "快速", medium: "标准", high: "深入", xhigh: "最深" };
+const searchModeNames = { default: "默认", on: "开", off: "关" };
 const state = {
   config: null,
   chats: [],
@@ -65,6 +69,7 @@ const state = {
   streamError: "",
   draftModel: "",
   draftEffort: "medium",
+  draftSearchMode: "off",
   booted: false,
 };
 
@@ -358,6 +363,10 @@ function currentEffort() {
   return state.current?.reasoningEffort || state.draftEffort || "medium";
 }
 
+function currentSearchMode() {
+  return state.current?.webSearchMode || state.draftSearchMode || "off";
+}
+
 function renderChats() {
   if (!state.chats.length) {
     elements.chatList.innerHTML = '<div class="empty-list" style="min-height:100px;font-size:12px">还没有对话</div>';
@@ -392,6 +401,7 @@ function renderMessages(scroll = false) {
 function renderHeader() {
   elements.modelName.textContent = currentModel();
   elements.effortLabel.textContent = effortNames[currentEffort()] || currentEffort();
+  elements.searchLabel.textContent = `联网搜索：${searchModeNames[currentSearchMode()] || "关"}`;
   elements.fileCount.textContent = String(state.files.length);
   elements.filesButton.disabled = !state.current;
   elements.rename.disabled = !state.current;
@@ -409,6 +419,10 @@ function renderModelMenu() {
 
 function renderEffortMenu() {
   $$("#effortMenu [data-effort]").forEach((button) => button.classList.toggle("active", button.dataset.effort === currentEffort()));
+}
+
+function renderSearchMenu() {
+  $$("#searchMenu [data-search-mode]").forEach((button) => button.classList.toggle("active", button.dataset.searchMode === currentSearchMode()));
 }
 
 function renderFiles() {
@@ -450,6 +464,7 @@ function renderAll(scroll = false) {
   renderHeader();
   renderModelMenu();
   renderEffortMenu();
+  renderSearchMenu();
   renderFiles();
   renderSettings();
 }
@@ -498,7 +513,7 @@ function openSidebar() { document.body.classList.add("sidebar-open"); }
 function closeSidebar() { document.body.classList.remove("sidebar-open"); }
 
 function closePopovers(except = null) {
-  [elements.modelMenu, elements.effortMenu].forEach((menu) => {
+  [elements.modelMenu, elements.effortMenu, elements.searchMenu].forEach((menu) => {
     if (menu !== except) menu.hidden = true;
   });
 }
@@ -572,7 +587,7 @@ async function createChat() {
   if (state.running) throw new Error("请先停止当前回答，再新建对话");
   const chat = await api("/api/chats", {
     method: "POST",
-    body: JSON.stringify({ model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort() }),
+    body: JSON.stringify({ model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
   });
   await loadChats();
   await selectChat(chat.id);
@@ -606,6 +621,15 @@ async function chooseEffort(effort) {
   if (state.current) await updateChat({ reasoningEffort: effort });
   else state.draftEffort = effort;
   elements.effortMenu.hidden = true;
+  renderAll();
+}
+
+async function chooseSearchMode(mode) {
+  if (state.running) throw new Error("请等待当前回答结束后再调整联网搜索");
+  if (!searchModeNames[mode]) return;
+  if (state.current) await updateChat({ webSearchMode: mode });
+  else state.draftSearchMode = mode;
+  elements.searchMenu.hidden = true;
   renderAll();
 }
 
@@ -672,7 +696,7 @@ async function sendMessage() {
     const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort() }),
+      body: JSON.stringify({ content, model: currentModel() === "Codex 默认模型" ? "" : currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
     });
     if (response.status === 401) { showLogin(); throw new Error("需要访问密码"); }
     if (!response.ok || !response.body) {
@@ -806,6 +830,7 @@ async function bootstrap() {
   state.config = await api("/api/config");
   state.draftModel = state.config.defaultModel || state.config.suggestedModels[0] || "";
   state.draftEffort = state.config.defaultReasoningEffort || "medium";
+  state.draftSearchMode = state.config.defaultWebSearchMode || "off";
   elements.connectionText.textContent = `${state.config.userRole} · ${state.config.lanMode ? "局域网安全连接" : `127.0.0.1:${state.config.port}`}`;
   await loadChats();
   if (state.chats.length) await selectChat(state.chats[0].id, { closeMobile: false });
@@ -872,6 +897,14 @@ elements.effortButton.addEventListener("click", (event) => {
   elements.effortMenu.hidden = !elements.effortMenu.hidden;
   closePopovers(elements.effortMenu.hidden ? null : elements.effortMenu);
 });
+elements.searchButton.addEventListener("click", (event) => {
+  event.stopPropagation();
+  renderSearchMenu();
+  const rect = elements.searchButton.getBoundingClientRect();
+  elements.searchMenu.style.left = `${Math.max(10, rect.left)}px`;
+  elements.searchMenu.hidden = !elements.searchMenu.hidden;
+  closePopovers(elements.searchMenu.hidden ? null : elements.searchMenu);
+});
 elements.useCustomModel.addEventListener("click", () => chooseModel(elements.customModel.value));
 elements.customModel.addEventListener("keydown", (event) => { if (event.key === "Enter") chooseModel(elements.customModel.value); });
 elements.modelOptions.addEventListener("click", (event) => {
@@ -881,6 +914,10 @@ elements.modelOptions.addEventListener("click", (event) => {
 elements.effortMenu.addEventListener("click", (event) => {
   const button = event.target.closest("[data-effort]");
   if (button) chooseEffort(button.dataset.effort).catch((error) => toast(error.message, "error"));
+});
+elements.searchMenu.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-search-mode]");
+  if (button) chooseSearchMode(button.dataset.searchMode).catch((error) => toast(error.message, "error"));
 });
 elements.chatList.addEventListener("click", (event) => {
   const deleteButton = event.target.closest("[data-delete-chat]");
@@ -919,7 +956,7 @@ elements.form.addEventListener("drop", (event) => { event.preventDefault(); elem
 elements.input.addEventListener("paste", (event) => { if (event.clipboardData?.files?.length) uploadFiles(event.clipboardData.files); });
 $$('.close-dialog').forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 document.addEventListener("click", (event) => {
-  if (!event.target.closest(".popover") && !event.target.closest("#modelButton") && !event.target.closest("#effortButton")) closePopovers();
+  if (!event.target.closest(".popover") && !event.target.closest("#modelButton") && !event.target.closest("#effortButton") && !event.target.closest("#searchButton")) closePopovers();
 });
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
