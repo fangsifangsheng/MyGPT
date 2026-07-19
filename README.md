@@ -23,8 +23,11 @@ npm start
 $env:LOCALGPT_PORT = "4317"
 $env:LOCALGPT_DATA_DIR = "D:\LocalGPT-data"
 $env:LOCALGPT_PASSWORD = "your-password"
+$env:LOCALGPT_PROXY_URL = "http://127.0.0.1:10809"
 npm start
 ```
+
+双击启动脚本时，MyGPT 默认把 `http://127.0.0.1:10809` 注入 Codex 及其启动的 PowerShell、curl 等命令。使用其他代理端口时，可在启动前通过 `LOCALGPT_PROXY_URL` 覆盖。Codex 仍使用 `workspace-write` 隔离当前会话目录，但已为该沙箱显式开启网络访问。
 
 ## 手机或局域网访问
 
@@ -61,6 +64,8 @@ npm run lan
 - 使用同一个 Codex 线程继续对话
 - 使用 Codex 协议中断停止正在运行的任务
 - Markdown、代码块和复制按钮
+- Markdown 表格和 KaTeX 数学公式
+- 实时问题优先使用 Codex live web search
 - 局域网密码登录
 - 会话路径和文件路径边界保护
 

@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "id": "chat-20260719-100049-90f1",
+  "userRole": "phonezl",
+  "title": "总结gpt 5.6 sol terra luna 差别，可以适当举例",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "high",
+  "codexThreadId": "019f79d2-a1b3-7a61-8a56-055fd4543037",
+  "createdAt": "2026-07-19T10:00:49.489Z",
+  "updatedAt": "2026-07-19T10:06:43.985Z",
+  "messages": [
+    {
+      "id": "ed35b2d0-54df-4581-a463-241fbb4b8daa",
+      "role": "user",
+      "content": "总结gpt 5.6 sol terra luna 差别，可以适当举例",
+      "createdAt": "2026-07-19T10:01:14.908Z"
+    },
+    {
+      "id": "851e4ce2-443d-4fd0-afa6-ef350f7d4371",
+      "role": "user",
+      "content": "你还在吗，继续",
+      "createdAt": "2026-07-19T10:06:43.985Z"
+    }
+  ]
+}

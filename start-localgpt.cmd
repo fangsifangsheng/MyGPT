@@ -6,6 +6,7 @@ set "LOCALGPT_ROOT=%~dp0"
 set "LOCALGPT_PID_FILE=%~dp0.localgpt.pid"
 set "LOCALGPT_LOG_DIR=%~dp0logs"
 set "LOCALGPT_MODE=local"
+if not defined LOCALGPT_PROXY_URL set "LOCALGPT_PROXY_URL=http://127.0.0.1:10809"
 if /I "%~1"=="lan" set "LOCALGPT_MODE=lan"
 
 if exist "%LOCALGPT_PID_FILE%" (

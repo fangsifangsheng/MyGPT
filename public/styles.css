@@ -189,11 +189,6 @@ svg {
 .hero-mark.small { width: 38px; height: 38px; border-radius: 11px; font-size: 18px; margin: 0 auto; }
 .empty-state h1 { font-size: 27px; letter-spacing: -.6px; margin: 20px 0 8px; font-weight: 650; }
 .empty-state > p { max-width: 570px; margin: 0; color: var(--muted); line-height: 1.6; }
-.suggestions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; gap: 9px; margin-top: 34px; }
-.suggestions button { min-width: 0; height: 68px; text-align: left; padding: 12px 15px; border: 1px solid var(--line); background: #fff; border-radius: 13px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
-.suggestions button:hover { background: var(--surface); border-color: #d9d9dc; }
-.suggestions strong { font-size: 13px; font-weight: 600; }
-.suggestions span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .messages { width: 100%; }
 .message-row { width: 100%; padding: 18px 24px; }
@@ -212,6 +207,20 @@ svg {
 .message-content li { margin: 4px 0; }
 .message-content a { color: #1769aa; }
 .message-content code { background: #f0f0f1; border-radius: 5px; padding: 2px 5px; font: 13px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.math-inline { display: inline; max-width: 100%; }
+.math-display { width: 100%; margin: 16px 0; padding: 4px 0; overflow-x: auto; overflow-y: hidden; text-align: center; -webkit-overflow-scrolling: touch; }
+.math-display .katex-display { margin: 0; }
+.math-fallback { font-family: Cambria Math, STIX Two Math, serif; }
+.table-scroll { width: 100%; margin: 14px 0 18px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; -webkit-overflow-scrolling: touch; }
+.message-content table { width: 100%; min-width: 340px; border-collapse: collapse; border-spacing: 0; font-size: 14px; line-height: 1.5; }
+.message-content th, .message-content td { padding: 9px 12px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+.message-content th:last-child, .message-content td:last-child { border-right: 0; }
+.message-content tbody tr:last-child td { border-bottom: 0; }
+.message-content th { background: #f7f7f8; font-weight: 620; color: #3d3d42; }
+.message-content tbody tr:nth-child(even) { background: #fbfbfc; }
+.message-content .align-left { text-align: left; }
+.message-content .align-center { text-align: center; }
+.message-content .align-right { text-align: right; }
 .code-block { position: relative; margin: 14px 0; background: #1f1f1f; color: #ececec; border-radius: 10px; overflow: hidden; }
 .code-header { height: 34px; background: #2b2b2b; padding: 0 12px; display: flex; align-items: center; justify-content: space-between; color: #bdbdbd; font-size: 11px; }
 .copy-code { border: 0; color: #d8d8d8; background: transparent; cursor: pointer; font-size: 11px; }
@@ -350,9 +359,9 @@ svg {
   .empty-state { min-height: calc(100vh - 190px); justify-content: flex-start; padding-top: 15vh; }
   .empty-state h1 { font-size: 23px; }
   .empty-state > p { font-size: 13px; }
-  .suggestions { grid-template-columns: 1fr 1fr; margin-top: 26px; gap: 7px; }
-  .suggestions button { padding: 10px 11px; height: 64px; }
-  .suggestions span { font-size: 11px; }
+  .math-display { margin: 13px 0; text-align: left; }
+  .message-content table { font-size: 13px; }
+  .message-content th, .message-content td { padding: 8px 10px; }
   .message-row { padding: 15px 14px; }
   .message-inner { gap: 11px; }
   .message-avatar { width: 25px; height: 25px; flex-basis: 25px; border-radius: 8px; }
@@ -369,8 +378,6 @@ svg {
 }
 
 @media (max-width: 430px) {
-  .suggestions { grid-template-columns: 1fr; }
-  .suggestions button:nth-child(n+3) { display: none; }
   .empty-state { padding-top: 12vh; }
 }
 

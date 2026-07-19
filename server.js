@@ -25,14 +25,70 @@ const CODEX_JS = process.platform === "win32"
   ? path.join(process.env.APPDATA || "", "npm", "node_modules", "@openai", "codex", "bin", "codex.js")
   : null;
 const CODEX_COMMAND = process.platform === "win32" && fsSync.existsSync(CODEX_JS) ? process.execPath : "codex";
-const CODEX_PREFIX_ARGS = process.platform === "win32" && CODEX_COMMAND === process.execPath ? [CODEX_JS] : [];
+const CODEX_PREFIX_ARGS = [
+  ...(process.platform === "win32" && CODEX_COMMAND === process.execPath ? [CODEX_JS] : []),
+  "-c",
+  "sandbox_workspace_write.network_access=true",
+  "-c",
+  "web_search=\"live\"",
+];
+
+function makeCodexEnvironment() {
+  const proxyUrl = String(
+    process.env.LOCALGPT_PROXY_URL
+      || process.env.PROXY_URL
+      || process.env.HTTPS_PROXY
+      || process.env.HTTP_PROXY
+      || "",
+  ).trim();
+  const noProxy = String(process.env.NO_PROXY || process.env.no_proxy || "localhost,127.0.0.1,::1").trim();
+  const env = {
+    ...process.env,
+    NO_PROXY: noProxy,
+    no_proxy: noProxy,
+    NODE_USE_ENV_PROXY: process.env.NODE_USE_ENV_PROXY || "1",
+  };
+  if (proxyUrl) {
+    Object.assign(env, {
+      PROXY_URL: proxyUrl,
+      HTTP_PROXY: proxyUrl,
+      HTTPS_PROXY: proxyUrl,
+      ALL_PROXY: proxyUrl,
+      http_proxy: proxyUrl,
+      https_proxy: proxyUrl,
+      all_proxy: proxyUrl,
+    });
+  }
+  return { env, proxyUrl };
+}
+
+function proxyLabel(value) {
+  if (!value) return "未配置";
+  try {
+    const url = new URL(value);
+    return `${url.protocol}//${url.hostname}${url.port ? `:${url.port}` : ""}`;
+  } catch {
+    return "已配置";
+  }
+}
+
+const codexEnvironment = makeCodexEnvironment();
 const CHAT_DEVELOPER_INSTRUCTIONS = `You are being used through MyGPT as a general chat assistant.
 Always provide a complete, self-contained final answer in the chat, even when you used tools or changed files.
 When the user asks for code, include the complete requested code in fenced code blocks in the final answer. Never replace the answer with only a statement that code was written to a file.
 Prefer answering in chat. Do not create or modify files unless the user explicitly asks for file changes or file creation.
 Uploaded files in the workspace may be read when relevant. Summarize findings and results in the final answer.
-Use concise progress updates during longer work, then give the full result. Respond in the user's language.`;
-const codexAppServer = new CodexAppServer({ command: CODEX_COMMAND, prefixArgs: CODEX_PREFIX_ARGS, cwd: __dirname });
+Use concise progress updates during longer work, then give the full result. Respond in the user's language.
+For questions that depend on current information (prices, weather, news, exchange rates, live service status, or today's data), use the built-in live web search first and cite the source time or URL in the final answer. Do not claim that an interface is unavailable before trying live web search.
+On Windows, use the native PowerShell host directly. Do not wrap commands in cmd.exe /c or another powershell.exe -Command unless a .cmd/.bat file or CMD built-in genuinely requires it. Keep command syntax consistently PowerShell so quotes, pipes, dollar signs, and parentheses are parsed only once.
+When a shell command must make an HTTP(S) request, Windows PowerShell 5.1 must pass the proxy explicitly, for example: Invoke-RestMethod -Uri $url -Proxy $env:PROXY_URL. Do not rely on HTTP_PROXY environment-variable autodetection in Windows PowerShell. If PowerShell or curl fails with a TLS/Schannel error, stop retrying that client and use live web search or a Node.js fetch request instead.
+Use standard Markdown tables without blank lines between table rows. Write math with LaTeX delimiters \\( ... \\) for inline formulas and \\[ ... \\] for display formulas so MyGPT can render it cleanly.`;
+const codexAppServer = new CodexAppServer({
+  command: CODEX_COMMAND,
+  prefixArgs: CODEX_PREFIX_ARGS,
+  cwd: __dirname,
+  env: codexEnvironment.env,
+});
 
 await fs.mkdir(USERS_ROOT, { recursive: true });
 
@@ -734,6 +790,7 @@ app.post("/api/chats/:id/stop", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+app.use("/vendor/katex", express.static(path.join(__dirname, "node_modules", "katex", "dist")));
 app.use(express.static(path.join(__dirname, "public"), { extensions: ["html"] }));
 app.get(/.*/, (req, res) => res.sendFile(path.join(__dirname, "public", "index.html")));
 
@@ -758,4 +815,5 @@ app.listen(PORT, HOST, () => {
     if (!configuredPassword) console.log("提示: 本次密码为随机生成，重启后会变化。可设置 LOCALGPT_PASSWORD 固定密码。");
   }
   console.log(`会话目录: ${DATA_ROOT}\n`);
+  console.log(`Codex 网络: 已启用，Web Search: live，代理: ${proxyLabel(codexEnvironment.proxyUrl)}\n`);
 });

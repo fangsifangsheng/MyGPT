@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "chat-20260719-083017-a1b9",
+  "userRole": "phonezl",
+  "title": "比特币现在价格多少",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "medium",
+  "codexThreadId": "019f797f-692f-7051-90d9-be8762283386",
+  "createdAt": "2026-07-19T08:30:17.296Z",
+  "updatedAt": "2026-07-19T08:32:15.928Z",
+  "messages": [
+    {
+      "id": "c85307a0-7950-4608-97e4-6aa85e2c9fa1",
+      "role": "user",
+      "content": "比特币现在价格多少",
+      "createdAt": "2026-07-19T08:30:20.960Z"
+    },
+    {
+      "id": "c1cbbb2f-3f4f-4159-900c-c75b0f4c4037",
+      "role": "assistant",
+      "content": "我目前无法连接实时行情接口，所以不能可靠报出“现在”的价格。\n\n你可以在以下平台查看 BTC/USDT 实时报价：\n\n- Binance：https://www.binance.com/zh-CN/trade/BTC_USDT\n- CoinGecko：https://www.coingecko.com/zh/数字货币/比特币\n- TradingView：https://www.tradingview.com/symbols/BTCUSDT/",
+      "createdAt": "2026-07-19T08:32:15.928Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "total": {
+          "totalTokens": 29071,
+          "inputTokens": 28705,
+          "cachedInputTokens": 14080,
+          "outputTokens": 366,
+          "reasoningOutputTokens": 123
+        },
+        "last": {
+          "totalTokens": 14637,
+          "inputTokens": 14477,
+          "cachedInputTokens": 14080,
+          "outputTokens": 160,
+          "reasoningOutputTokens": 64
+        },
+        "modelContextWindow": 353400
+      },
+      "interrupted": false
+    }
+  ]
+}

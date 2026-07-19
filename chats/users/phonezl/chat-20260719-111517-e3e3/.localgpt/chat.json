@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "id": "chat-20260719-111517-e3e3",
+  "userRole": "phonezl",
+  "title": "比特币现在价格多少",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "medium",
+  "codexThreadId": "019f7a16-93ad-7692-994e-4824beadac91",
+  "createdAt": "2026-07-19T11:15:17.595Z",
+  "updatedAt": "2026-07-19T11:26:26.352Z",
+  "messages": [
+    {
+      "id": "c2302217-b7c1-4f2d-9d9e-5d8675f7372a",
+      "role": "user",
+      "content": "比特币现在价格多少",
+      "createdAt": "2026-07-19T11:15:27.646Z"
+    },
+    {
+      "id": "432a9b72-ffbc-411a-ae28-16f9146928b2",
+      "role": "user",
+      "content": "你还在吗继续",
+      "createdAt": "2026-07-19T11:19:24.290Z"
+    },
+    {
+      "id": "f36609e0-53d7-40e9-bf3b-4874a8ce731a",
+      "role": "assistant",
+      "content": "我这边实时行情接口连接失败，暂时无法可靠报出当前价格。你可以在交易所或搜索“BTC USD”查看实时价格；如果你发来行情截图或数值，我可以帮你换算成人民币、分析涨跌。",
+      "createdAt": "2026-07-19T11:26:26.352Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "total": {
+          "totalTokens": 107260,
+          "inputTokens": 105832,
+          "cachedInputTokens": 56667,
+          "outputTokens": 1428,
+          "reasoningOutputTokens": 119
+        },
+        "last": {
+          "totalTokens": 20521,
+          "inputTokens": 20201,
+          "cachedInputTokens": 20022,
+          "outputTokens": 320,
+          "reasoningOutputTokens": 56
+        },
+        "modelContextWindow": 258400
+      },
+      "interrupted": false
+    }
+  ]
+}

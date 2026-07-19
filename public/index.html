@@ -12,7 +12,8 @@
     <link rel="icon" href="/GPT%20logo.png" type="image/png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/GPT%20logo-180.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/styles.css?v=0.2.0" />
+    <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=0.18.1" />
+    <link rel="stylesheet" href="/styles.css?v=0.3.0" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -76,12 +77,6 @@
             <img class="hero-logo" src="/GPT%20logo.png" alt="MyGPT" />
             <h1>有什么可以帮忙的？</h1>
             <p>在本地与 Codex 对话。每段对话都有独立文件夹，上传的文件可直接读取和处理。</p>
-            <div class="suggestions">
-              <button type="button" data-prompt="阅读我上传的文件，先总结它的结构和关键内容。"><strong>阅读文件</strong><span>总结结构和关键内容</span></button>
-              <button type="button" data-prompt="检查当前目录中的代码，告诉我项目结构和如何运行。"><strong>理解项目</strong><span>分析目录与运行方式</span></button>
-              <button type="button" data-prompt="帮我整理当前目录中的资料，给出清晰的分类建议。"><strong>整理资料</strong><span>归类并提出建议</span></button>
-              <button type="button" data-prompt="查看当前目录，告诉我接下来最值得做的三件事。"><strong>规划下一步</strong><span>根据上下文给出行动项</span></button>
-            </div>
           </div>
           <div id="messages" class="messages" aria-live="polite"></div>
         </section>
@@ -154,6 +149,7 @@
     </dialog>
 
     <div id="toastRegion" class="toast-region" aria-live="assertive"></div>
-    <script type="module" src="/app.js?v=0.2.0"></script>
+    <script src="/vendor/katex/katex.min.js?v=0.18.1"></script>
+    <script type="module" src="/app.js?v=0.3.0"></script>
   </body>
 </html>

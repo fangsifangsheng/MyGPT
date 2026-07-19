@@ -3,11 +3,12 @@ import readline from "node:readline";
 import { spawn } from "node:child_process";
 
 export class CodexAppServer extends EventEmitter {
-  constructor({ command, prefixArgs = [], cwd }) {
+  constructor({ command, prefixArgs = [], cwd, env = process.env }) {
     super();
     this.command = command;
     this.prefixArgs = prefixArgs;
     this.cwd = cwd;
+    this.env = env;
     this.child = null;
     this.pending = new Map();
     this.nextId = 1;
@@ -31,7 +32,7 @@ export class CodexAppServer extends EventEmitter {
       windowsHide: true,
       shell: false,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: this.env,
     });
     this.child = child;
     this.stderr = "";

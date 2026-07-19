@@ -100,20 +100,90 @@ function escapeHtml(value) {
   })[char]);
 }
 
+function renderMath(value, displayMode = false) {
+  const source = String(value ?? "").trim();
+  const tag = displayMode ? "div" : "span";
+  const className = displayMode ? "math-display" : "math-inline";
+  if (!source) return "";
+  try {
+    if (window.katex?.renderToString) {
+      const html = window.katex.renderToString(source, {
+        displayMode,
+        throwOnError: false,
+        strict: "ignore",
+        trust: false,
+        output: "htmlAndMathml",
+      });
+      return `<${tag} class="${className}">${html}</${tag}>`;
+    }
+  } catch {}
+  return `<${tag} class="${className} math-fallback">${escapeHtml(source)}</${tag}>`;
+}
+
 function inlineMarkdown(value) {
   const code = [];
-  let text = escapeHtml(value).replace(/`([^`]+)`/g, (_, content) => {
+  const math = [];
+  let source = String(value ?? "").replace(/`([^`]+)`/g, (_, content) => {
     const key = `LOCALGPTINLINECODE${code.length}TOKEN`;
-    code.push(`<code>${content}</code>`);
+    code.push(`<code>${escapeHtml(content)}</code>`);
     return key;
   });
+  const saveMath = (content) => {
+    const key = `LOCALGPTINLINEMATH${math.length}TOKEN`;
+    math.push(renderMath(content));
+    return key;
+  };
+  source = source.replace(/\\\((.+?)\\\)/g, (_, content) => saveMath(content));
+  let text = escapeHtml(source);
   text = text
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/__([^_]+)__/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
     .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
   code.forEach((html, index) => { text = text.replace(`LOCALGPTINLINECODE${index}TOKEN`, html); });
+  math.forEach((html, index) => { text = text.replace(`LOCALGPTINLINEMATH${index}TOKEN`, html); });
   return text;
+}
+
+function splitTableRow(line) {
+  let source = String(line).trim();
+  if (source.startsWith("|")) source = source.slice(1);
+  if (source.endsWith("|")) source = source.slice(0, -1);
+  const cells = [];
+  let current = "";
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === "\\" && source[index + 1] === "|") {
+      current += "|";
+      index += 1;
+    } else if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current.trim());
+  return cells;
+}
+
+function tableAlignments(line) {
+  if (!String(line).includes("|")) return null;
+  const cells = splitTableRow(line);
+  if (!cells.length || !cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s+/g, "")))) return null;
+  return cells.map((cell) => {
+    const marker = cell.replace(/\s+/g, "");
+    if (marker.startsWith(":") && marker.endsWith(":")) return "center";
+    if (marker.endsWith(":")) return "right";
+    return "left";
+  });
+}
+
+function renderTable(headers, alignments, rows) {
+  const cell = (tag, value, index) => `<${tag} class="align-${alignments[index] || "left"}">${inlineMarkdown(value || "")}</${tag}>`;
+  const head = headers.map((value, index) => cell("th", value, index)).join("");
+  const body = rows.map((row) => `<tr>${alignments.map((_, index) => cell("td", row[index], index)).join("")}</tr>`).join("");
+  return `<div class="table-scroll" role="region" tabindex="0"><table><thead><tr>${head}</tr></thead>${body ? `<tbody>${body}</tbody>` : ""}</table></div>`;
 }
 
 function renderMarkdown(value) {
@@ -127,7 +197,8 @@ function renderMarkdown(value) {
     list = null;
   };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
     const fence = line.match(/^```\s*([\w.+-]*)\s*$/);
     if (fence) {
       if (code) {
@@ -148,6 +219,41 @@ function renderMarkdown(value) {
     if (!line.trim()) {
       closeList();
       continue;
+    }
+    const trimmed = line.trim();
+    const singleLineMath = trimmed.match(/^\\\[([\s\S]+)\\\]$/) || trimmed.match(/^\$\$([\s\S]+)\$\$$/);
+    if (singleLineMath) {
+      closeList();
+      output.push(renderMath(singleLineMath[1], true));
+      continue;
+    }
+    if (trimmed === "\\[" || trimmed === "$$") {
+      closeList();
+      const closing = trimmed === "\\[" ? "\\]" : "$$";
+      const math = [];
+      index += 1;
+      while (index < lines.length && lines[index].trim() !== closing) {
+        math.push(lines[index]);
+        index += 1;
+      }
+      output.push(renderMath(math.join("\n"), true));
+      continue;
+    }
+    const alignments = index + 1 < lines.length ? tableAlignments(lines[index + 1]) : null;
+    if (alignments) {
+      const headers = splitTableRow(line);
+      if (headers.length === alignments.length) {
+        closeList();
+        const rows = [];
+        index += 2;
+        while (index < lines.length && lines[index].trim() && lines[index].includes("|")) {
+          rows.push(splitTableRow(lines[index]));
+          index += 1;
+        }
+        index -= 1;
+        output.push(renderTable(headers, alignments, rows));
+        continue;
+      }
     }
     const heading = line.match(/^(#{1,3})\s+(.+)$/);
     if (heading) {
@@ -777,10 +883,6 @@ elements.messages.addEventListener("click", async (event) => {
     const item = state.current?.messages.find((message) => message.id === id);
     if (item) { await navigator.clipboard.writeText(item.content); toast("回答已复制"); }
   }
-});
-elements.empty.addEventListener("click", (event) => {
-  const suggestion = event.target.closest("[data-prompt]");
-  if (suggestion) { elements.input.value = suggestion.dataset.prompt; resizeInput(); elements.input.focus(); }
 });
 elements.form.addEventListener("dragover", (event) => { event.preventDefault(); elements.form.style.borderColor = "#171717"; });
 elements.form.addEventListener("dragleave", () => { elements.form.style.borderColor = ""; });

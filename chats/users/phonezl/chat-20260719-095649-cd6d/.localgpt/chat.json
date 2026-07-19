@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "chat-20260719-095649-cd6d",
+  "userRole": "phonezl",
+  "title": "我想洗车，我家距离洗车店只有50米，请问你推荐我走路去还是开车去呢？",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "low",
+  "codexThreadId": "019f79cf-33f7-7dd0-b038-12316755f40a",
+  "createdAt": "2026-07-19T09:56:49.306Z",
+  "updatedAt": "2026-07-19T09:57:45.112Z",
+  "messages": [
+    {
+      "id": "e818b819-3d70-4abe-8998-ea36149566bb",
+      "role": "user",
+      "content": "我想洗车，我家距离洗车店只有50米，请问你推荐我走路去还是开车去呢？",
+      "createdAt": "2026-07-19T09:57:30.211Z"
+    },
+    {
+      "id": "c6f68ea4-ecc2-4595-9924-506e2981f648",
+      "role": "assistant",
+      "content": "开车去。毕竟要洗的是车，不是你。😄",
+      "createdAt": "2026-07-19T09:57:45.112Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "total": {
+          "totalTokens": 14663,
+          "inputTokens": 14643,
+          "cachedInputTokens": 0,
+          "outputTokens": 20,
+          "reasoningOutputTokens": 0
+        },
+        "last": {
+          "totalTokens": 14663,
+          "inputTokens": 14643,
+          "cachedInputTokens": 0,
+          "outputTokens": 20,
+          "reasoningOutputTokens": 0
+        },
+        "modelContextWindow": 258400
+      },
+      "interrupted": false
+    }
+  ]
+}
