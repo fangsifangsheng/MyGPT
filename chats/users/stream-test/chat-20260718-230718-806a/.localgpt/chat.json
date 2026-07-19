@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "chat-20260718-230718-806a",
+  "userRole": "stream-test",
+  "title": "stream test",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "low",
+  "codexThreadId": "019f777b-ee58-7611-9d64-4bfe988f2e88",
+  "createdAt": "2026-07-18T23:07:18.285Z",
+  "updatedAt": "2026-07-18T23:07:32.378Z",
+  "messages": [
+    {
+      "id": "020b41bb-dca9-46ee-ad20-cda3dadf3b0c",
+      "role": "user",
+      "content": "Return a complete JavaScript function named add that adds two numbers. Show it in a fenced code block. Do not create files.",
+      "createdAt": "2026-07-18T23:07:18.294Z"
+    },
+    {
+      "id": "60030b79-0e9c-454c-9037-2a1e06390142",
+      "role": "assistant",
+      "content": "```javascript\nfunction add(a, b) {\n  return a + b;\n}\n```",
+      "createdAt": "2026-07-18T23:07:32.378Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "total": {
+          "totalTokens": 17912,
+          "inputTokens": 17890,
+          "cachedInputTokens": 0,
+          "outputTokens": 22,
+          "reasoningOutputTokens": 0
+        },
+        "last": {
+          "totalTokens": 17912,
+          "inputTokens": 17890,
+          "cachedInputTokens": 0,
+          "outputTokens": 22,
+          "reasoningOutputTokens": 0
+        },
+        "modelContextWindow": 353400
+      },
+      "interrupted": false
+    }
+  ]
+}

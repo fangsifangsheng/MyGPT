@@ -3,11 +3,10 @@ import fs from "node:fs/promises";
 import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import multer from "multer";
+import { CodexAppServer } from "./codex-app-server.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_ROOT = path.resolve(process.env.LOCALGPT_DATA_DIR || path.join(__dirname, "chats"));
@@ -27,6 +26,13 @@ const CODEX_JS = process.platform === "win32"
   : null;
 const CODEX_COMMAND = process.platform === "win32" && fsSync.existsSync(CODEX_JS) ? process.execPath : "codex";
 const CODEX_PREFIX_ARGS = process.platform === "win32" && CODEX_COMMAND === process.execPath ? [CODEX_JS] : [];
+const CHAT_DEVELOPER_INSTRUCTIONS = `You are being used through MyGPT as a general chat assistant.
+Always provide a complete, self-contained final answer in the chat, even when you used tools or changed files.
+When the user asks for code, include the complete requested code in fenced code blocks in the final answer. Never replace the answer with only a statement that code was written to a file.
+Prefer answering in chat. Do not create or modify files unless the user explicitly asks for file changes or file creation.
+Uploaded files in the workspace may be read when relevant. Summarize findings and results in the final answer.
+Use concise progress updates during longer work, then give the full result. Respond in the user's language.`;
+const codexAppServer = new CodexAppServer({ command: CODEX_COMMAND, prefixArgs: CODEX_PREFIX_ARGS, cwd: __dirname });
 
 await fs.mkdir(USERS_ROOT, { recursive: true });
 
@@ -425,30 +431,225 @@ function ndjson(res, payload) {
   if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(payload)}\n`);
 }
 
-function activityFromEvent(event) {
-  const item = event.item || {};
-  if (event.type === "turn.started") return "Codex 正在思考…";
-  if (event.type === "item.started" && item.type === "command_execution") return "正在执行命令…";
-  if (event.type === "item.completed" && item.type === "command_execution") return "命令执行完成";
-  if (event.type === "item.started" && item.type === "mcp_tool_call") return "正在调用工具…";
-  if (event.type === "item.completed" && item.type === "mcp_tool_call") return "工具调用完成";
-  if (event.type === "item.completed" && item.type === "reasoning") return "推理完成，正在组织回答…";
-  return null;
-}
-
 function normalizeEffort(value) {
   const effort = String(value || "medium").toLowerCase();
   return ["low", "medium", "high", "xhigh"].includes(effort) ? effort : "medium";
 }
 
-function codexArgs(meta, role, prompt) {
-  const common = ["--json", "--skip-git-repo-check", "-c", 'approval_policy="never"'];
-  if (meta.model) common.push("-m", meta.model);
-  if (meta.reasoningEffort) common.push("-c", `model_reasoning_effort="${normalizeEffort(meta.reasoningEffort)}"`);
-  if (meta.codexThreadId) {
-    return ["exec", "resume", ...common, meta.codexThreadId, "-"];
+function shortText(value, max = 220) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function runProgress(run, stage, label, detail = "", status = "running") {
+  run.lastActivityAt = Date.now();
+  ndjson(run.res, {
+    type: "progress",
+    stage,
+    label,
+    detail: shortText(detail),
+    status,
+    at: new Date().toISOString(),
+  });
+}
+
+function runForEvent(params = {}) {
+  for (const run of activeRuns.values()) {
+    if (run.threadId && params.threadId === run.threadId && (!run.turnId || !params.turnId || params.turnId === run.turnId)) return run;
   }
-  return ["exec", ...common, "-s", "workspace-write", "-C", chatDir(meta.id, role), "-"];
+  return null;
+}
+
+function finalTextForRun(run) {
+  return [...run.agentItems.values()]
+    .filter((item) => item.phase === "final_answer" || item.phase === null)
+    .map((item) => item.text)
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function syncFinalText(run) {
+  const text = finalTextForRun(run);
+  if (text === run.sentText) return;
+  if (text.startsWith(run.sentText)) {
+    ndjson(run.res, { type: "assistant.delta", delta: text.slice(run.sentText.length) });
+  } else {
+    ndjson(run.res, { type: "assistant.replace", text });
+  }
+  run.sentText = text;
+  run.lastActivityAt = Date.now();
+}
+
+async function finishRun(run, status, turnError = null, durationMs = null) {
+  if (run.finishPromise) return run.finishPromise;
+  run.finishPromise = (async () => {
+    activeRuns.delete(run.key);
+    const finalText = finalTextForRun(run) || run.sentText.trim();
+    if (finalText) {
+      const assistantMessage = message("assistant", finalText, {
+        model: run.meta.model || null,
+        usage: run.usage || null,
+        interrupted: status === "interrupted",
+      });
+      run.meta.messages.push(assistantMessage);
+      await writeMeta(run.meta);
+      ndjson(run.res, { type: "assistant.message", message: assistantMessage });
+    }
+
+    if (status === "interrupted") {
+      ndjson(run.res, { type: "stopped", partial: Boolean(finalText) });
+    } else if (status === "failed") {
+      ndjson(run.res, { type: "error", error: turnError || "Codex 本轮执行失败，请重试。" });
+    } else if (!finalText) {
+      ndjson(run.res, {
+        type: "error",
+        error: "Codex 已结束本轮，但没有返回可展示的回答正文。请重试，或换一种更明确的提问方式。",
+      });
+    }
+    ndjson(run.res, { type: "done", status, durationMs, usage: run.usage || null });
+    run.res.end();
+  })().catch((error) => {
+    ndjson(run.res, { type: "error", error: error.message });
+    run.res.end();
+  });
+  return run.finishPromise;
+}
+
+codexAppServer.on("notification", (event) => {
+  const params = event.params || {};
+  const run = runForEvent(params);
+  if (!run) return;
+
+  if (event.method === "turn/started") {
+    run.turnId ||= params.turn?.id;
+    runProgress(run, "thinking", "Codex 已接收问题，正在分析");
+    return;
+  }
+
+  if (event.method === "item/started") {
+    const item = params.item || {};
+    if (item.type === "agentMessage") {
+      run.agentItems.set(item.id, { phase: item.phase ?? null, text: item.text || "" });
+      if (item.phase === "final_answer") runProgress(run, "answering", "正在生成回答");
+    } else if (item.type === "reasoning") {
+      runProgress(run, "thinking", "正在分析问题");
+    } else if (item.type === "commandExecution") {
+      runProgress(run, "tool", "正在执行命令", item.command);
+    } else if (item.type === "fileChange") {
+      runProgress(run, "file", "正在处理文件");
+    } else if (item.type === "mcpToolCall") {
+      runProgress(run, "tool", "正在调用工具", `${item.server || ""} ${item.tool || ""}`);
+    } else if (item.type === "webSearch") {
+      runProgress(run, "search", "正在搜索信息");
+    }
+    return;
+  }
+
+  if (event.method === "item/agentMessage/delta") {
+    const item = run.agentItems.get(params.itemId) || { phase: null, text: "" };
+    item.text += params.delta || "";
+    run.agentItems.set(params.itemId, item);
+    if (item.phase === "commentary") {
+      const now = Date.now();
+      if (!run.lastCommentaryAt || now - run.lastCommentaryAt > 300 || item.text.endsWith("\n")) {
+        run.lastCommentaryAt = now;
+        runProgress(run, "update", "Codex 进度", item.text.slice(-220));
+      }
+    } else {
+      syncFinalText(run);
+    }
+    return;
+  }
+
+  if (event.method === "item/completed") {
+    const item = params.item || {};
+    if (item.type === "agentMessage") {
+      const state = run.agentItems.get(item.id) || { phase: item.phase ?? null, text: "" };
+      state.phase = item.phase ?? state.phase;
+      state.text = item.text || state.text;
+      run.agentItems.set(item.id, state);
+      if (state.phase === "commentary") runProgress(run, "update", "进度更新", state.text, "completed");
+      else syncFinalText(run);
+    } else if (item.type === "commandExecution") {
+      const ok = item.exitCode === 0 || item.status === "completed";
+      const detail = ok
+        ? "命令已完成，Codex 正在继续整理回答"
+        : `命令已结束${item.exitCode !== null ? `，退出码 ${item.exitCode}` : ""}，Codex 正在处理结果`;
+      runProgress(run, "tool", detail, item.command, ok ? "completed" : "warning");
+    } else if (item.type === "fileChange") {
+      runProgress(run, "file", "文件处理完成，正在组织回答", "", "completed");
+    } else if (item.type === "mcpToolCall") {
+      runProgress(run, "tool", "工具调用完成，正在继续处理", item.tool, "completed");
+    } else if (item.type === "reasoning") {
+      runProgress(run, "thinking", "分析完成，正在生成回答", "", "completed");
+    }
+    return;
+  }
+
+  if (event.method === "item/reasoning/summaryTextDelta") {
+    runProgress(run, "thinking", "正在深入分析");
+    return;
+  }
+
+  if (event.method === "thread/tokenUsage/updated") {
+    run.usage = params.tokenUsage || null;
+    ndjson(run.res, { type: "usage", usage: run.usage });
+    return;
+  }
+
+  if (event.method === "warning" || event.method === "configWarning") {
+    runProgress(run, "warning", "Codex 提示", params.message || params.warning || "", "warning");
+    return;
+  }
+
+  if (event.method === "error") {
+    runProgress(run, "warning", "Codex 遇到问题，正在尝试恢复", params.message || "", "warning");
+    return;
+  }
+
+  if (event.method === "turn/completed") {
+    const status = params.turn?.status || "failed";
+    const error = params.turn?.error?.message || params.turn?.error?.additionalDetails || null;
+    finishRun(run, status, error, params.turn?.durationMs || null);
+  }
+});
+
+codexAppServer.on("exit", (error) => {
+  for (const run of activeRuns.values()) finishRun(run, "failed", error.message);
+});
+
+async function openCodexThread(run) {
+  const cwd = chatDir(run.meta.id, run.role);
+  const common = {
+    model: run.meta.model || null,
+    cwd,
+    runtimeWorkspaceRoots: [cwd],
+    approvalPolicy: "never",
+    sandbox: "workspace-write",
+    developerInstructions: CHAT_DEVELOPER_INSTRUCTIONS,
+    config: { model_reasoning_effort: normalizeEffort(run.meta.reasoningEffort) },
+  };
+  let result;
+  if (run.meta.codexThreadId) {
+    try {
+      result = await codexAppServer.request("thread/resume", {
+        threadId: run.meta.codexThreadId,
+        ...common,
+        excludeTurns: true,
+      }, 60000);
+    } catch (error) {
+      runProgress(run, "reconnect", "旧会话无法恢复，正在创建新的 Codex 会话", error.message, "warning");
+      run.meta.codexThreadId = null;
+    }
+  }
+  if (!result) result = await codexAppServer.request("thread/start", { ...common, ephemeral: false }, 60000);
+  run.threadId = result.thread.id;
+  if (run.meta.codexThreadId !== run.threadId) {
+    run.meta.codexThreadId = run.threadId;
+    await writeMeta(run.meta);
+  }
+  ndjson(run.res, { type: "thread.started", threadId: run.threadId });
 }
 
 app.post("/api/chats/:id/messages", async (req, res, next) => {
@@ -476,66 +677,45 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
     res.flushHeaders();
     ndjson(res, { type: "user.saved", message: userMessage, chat: { title: meta.title } });
 
-    const child = spawn(CODEX_COMMAND, [...CODEX_PREFIX_ARGS, ...codexArgs(meta, userRole, content)], {
-      cwd: chatDir(meta.id, userRole),
-      windowsHide: true,
-      shell: false,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
-    });
-    const run = { child, stopping: false };
-    activeRuns.set(runKey(userRole, meta.id), run);
-    child.stdin.end(content);
+    const key = runKey(userRole, meta.id);
+    const run = {
+      key,
+      role: userRole,
+      meta,
+      res,
+      threadId: null,
+      turnId: null,
+      agentItems: new Map(),
+      sentText: "",
+      usage: null,
+      stopping: false,
+      startedAt: Date.now(),
+      lastActivityAt: Date.now(),
+      finishPromise: null,
+    };
+    activeRuns.set(key, run);
+    runProgress(run, "connecting", "正在连接本地 Codex");
 
-    let finalText = "";
-    let stderr = "";
-    const lines = readline.createInterface({ input: child.stdout });
-    lines.on("line", async (line) => {
-      try {
-        const event = JSON.parse(line);
-        if (event.type === "thread.started" && event.thread_id && !meta.codexThreadId) {
-          meta.codexThreadId = event.thread_id;
-          await writeMeta(meta);
-          ndjson(res, { type: "thread.started", threadId: event.thread_id });
-        }
-        if (event.type === "item.completed" && event.item?.type === "agent_message") {
-          finalText += `${event.item.text || ""}\n`;
-        }
-        const activity = activityFromEvent(event);
-        if (activity) ndjson(res, { type: "activity", text: activity });
-        if (event.type === "turn.completed") {
-          run.usage = event.usage || null;
-          ndjson(res, { type: "usage", usage: run.usage });
-        }
-      } catch {
-        // Ignore non-JSON diagnostic output on stdout.
-      }
-    });
-    child.stderr.on("data", (chunk) => { stderr = (stderr + chunk.toString()).slice(-8000); });
-    child.on("error", (error) => { stderr += `\n${error.message}`; });
-    child.on("close", async (code) => {
-      activeRuns.delete(runKey(userRole, meta.id));
-      finalText = finalText.trim();
-      if (finalText) {
-        const assistantMessage = message("assistant", finalText, {
-          model: meta.model || null,
-          usage: run.usage || null,
-        });
-        meta.messages.push(assistantMessage);
-        await writeMeta(meta);
-        ndjson(res, { type: "assistant.message", message: assistantMessage });
-      }
-      if (run.stopping) {
-        ndjson(res, { type: "stopped" });
-      } else if (code !== 0) {
-        ndjson(res, { type: "error", error: stderr.trim() || `Codex 异常退出（代码 ${code}）` });
-      }
-      ndjson(res, { type: "done", code, usage: run.usage || null });
-      res.end();
-    });
+    await openCodexThread(run);
+    runProgress(run, "ready", "Codex 已连接，正在提交问题");
+    const result = await codexAppServer.request("turn/start", {
+      threadId: run.threadId,
+      clientUserMessageId: userMessage.id,
+      input: [{ type: "text", text: content, text_elements: [] }],
+      cwd: chatDir(meta.id, userRole),
+      approvalPolicy: "never",
+      model: meta.model || null,
+      effort: normalizeEffort(meta.reasoningEffort),
+    }, 60000);
+    run.turnId = result.turn.id;
+    if (run.stopping) {
+      await codexAppServer.request("turn/interrupt", { threadId: run.threadId, turnId: run.turnId });
+    }
   } catch (error) {
+    if (meta) activeRuns.delete(runKey(meta.userRole, meta.id));
     if (res.headersSent) {
       ndjson(res, { type: "error", error: error.message });
+      ndjson(res, { type: "done", status: "failed" });
       res.end();
     } else next(error);
   }
@@ -546,11 +726,9 @@ app.post("/api/chats/:id/stop", async (req, res, next) => {
     const run = activeRuns.get(runKey(requestRole(req), req.params.id));
     if (!run) return res.json({ ok: true, running: false });
     run.stopping = true;
-    if (process.platform === "win32") {
-      const killer = spawn("taskkill", ["/pid", String(run.child.pid), "/T", "/F"], { windowsHide: true });
-      killer.on("error", () => run.child.kill());
-    } else {
-      run.child.kill("SIGTERM");
+    runProgress(run, "stopping", "正在停止当前回答");
+    if (run.threadId && run.turnId) {
+      await codexAppServer.request("turn/interrupt", { threadId: run.threadId, turnId: run.turnId }, 30000);
     }
     res.json({ ok: true, running: true });
   } catch (error) { next(error); }

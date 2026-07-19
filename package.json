@@ -8,7 +8,7 @@
     "start": "node server.js",
     "lan": "node server.js --lan",
     "start:lan": "node server.js --lan",
-    "check": "node --check server.js && node --check public/app.js"
+    "check": "node --check server.js && node --check codex-app-server.js && node --check public/app.js"
   },
   "engines": {
     "node": ">=20"
