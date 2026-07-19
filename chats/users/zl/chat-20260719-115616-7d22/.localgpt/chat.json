@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "chat-20260719-115616-7d22",
+  "userRole": "zl",
+  "title": "新对话",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "medium",
+  "codexThreadId": null,
+  "createdAt": "2026-07-19T11:56:16.246Z",
+  "updatedAt": "2026-07-19T11:56:16.246Z",
+  "messages": []
+}

@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "id": "chat-20260719-124644-6285",
+  "userRole": "mygptcheck5",
+  "title": "BTC final verification",
+  "model": "gpt-5.6-sol",
+  "reasoningEffort": "medium",
+  "codexThreadId": "019f7a6a-2495-73f3-8a61-c088d2ef0422",
+  "createdAt": "2026-07-19T12:46:44.131Z",
+  "updatedAt": "2026-07-19T12:47:16.941Z",
+  "messages": [
+    {
+      "id": "986d6434-4602-47c5-b08b-2a80645b591c",
+      "role": "user",
+      "content": "比特币现在价格多少？请提供数据来源链接和查询时间。",
+      "createdAt": "2026-07-19T12:46:44.140Z"
+    },
+    {
+      "id": "734ab8c8-e217-4db4-8378-bb2fa0919623",
+      "role": "assistant",
+      "content": "截至 **2026年7月19日 20:47:07（北京时间，UTC+8）**：\n\n- 比特币价格：**64,339 美元/BTC**\n- 人民币参考价：**435,907 元/BTC**\n\n数据来源：[CoinGecko 实时价格 API](https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd%2Ccny&include_last_updated_at=true)\n\n加密货币价格波动较快，实际成交价会因交易平台而略有差异。",
+      "createdAt": "2026-07-19T12:47:16.940Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "total": {
+          "totalTokens": 32018,
+          "inputTokens": 31292,
+          "cachedInputTokens": 15104,
+          "outputTokens": 726,
+          "reasoningOutputTokens": 253
+        },
+        "last": {
+          "totalTokens": 16241,
+          "inputTokens": 15925,
+          "cachedInputTokens": 15104,
+          "outputTokens": 316,
+          "reasoningOutputTokens": 188
+        },
+        "modelContextWindow": 258400
+      },
+      "interrupted": false
+    }
+  ]
+}

@@ -7,13 +7,38 @@
   "reasoningEffort": "medium",
   "codexThreadId": "019f7a32-89c5-75d0-a519-a036991585b3",
   "createdAt": "2026-07-19T11:45:58.260Z",
-  "updatedAt": "2026-07-19T11:46:05.593Z",
+  "updatedAt": "2026-07-19T11:47:52.508Z",
   "messages": [
     {
       "id": "014a45a2-de57-4369-a170-cef98c7ffcc4",
       "role": "user",
       "content": "比特币现在价格多少",
       "createdAt": "2026-07-19T11:46:00.084Z"
+    },
+    {
+      "id": "500bae3a-e7c6-4fe9-aa4a-7be701d5df5b",
+      "role": "assistant",
+      "content": "比特币（BTC）当前约为：\n\n- **64,480 美元**\n- **436,864 元人民币**\n\n数据来源：[CoinGecko API](https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,cny)，实时价格会持续波动。",
+      "createdAt": "2026-07-19T11:47:52.508Z",
+      "model": "gpt-5.6-sol",
+      "usage": {
+        "total": {
+          "totalTokens": 91063,
+          "inputTokens": 90361,
+          "cachedInputTokens": 67584,
+          "outputTokens": 702,
+          "reasoningOutputTokens": 202
+        },
+        "last": {
+          "totalTokens": 31721,
+          "inputTokens": 31517,
+          "cachedInputTokens": 30720,
+          "outputTokens": 204,
+          "reasoningOutputTokens": 102
+        },
+        "modelContextWindow": 258400
+      },
+      "interrupted": false
     }
   ]
 }

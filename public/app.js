@@ -59,6 +59,7 @@ const state = {
   progress: [],
   runStartedAt: null,
   lastActivityAt: null,
+  lastHeartbeatAt: null,
   runStatus: "idle",
   usage: null,
   streamError: "",
@@ -123,9 +124,15 @@ function renderMath(value, displayMode = false) {
 function inlineMarkdown(value) {
   const code = [];
   const math = [];
+  const links = [];
   let source = String(value ?? "").replace(/`([^`]+)`/g, (_, content) => {
     const key = `LOCALGPTINLINECODE${code.length}TOKEN`;
     code.push(`<code>${escapeHtml(content)}</code>`);
+    return key;
+  });
+  source = source.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+    const key = `LOCALGPTLINK${links.length}TOKEN`;
+    links.push(`<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">${escapeHtml(label)}</a>`);
     return key;
   });
   const saveMath = (content) => {
@@ -139,9 +146,22 @@ function inlineMarkdown(value) {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/__([^_]+)__/g, "<strong>$1</strong>")
     .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
-    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noreferrer">$1</a>');
+    .replace(/https?:\/\/[^\s<]+/g, (match) => {
+      let url = match;
+      let suffix = "";
+      while (/[.,!?;:，。！？；：）】》]$/.test(url)) {
+        suffix = url.slice(-1) + suffix;
+        url = url.slice(0, -1);
+      }
+      while (url.endsWith(")") && (url.match(/\(/g) || []).length < (url.match(/\)/g) || []).length) {
+        suffix = `)${suffix}`;
+        url = url.slice(0, -1);
+      }
+      return `<a href="${url}" target="_blank" rel="noreferrer">${url}</a>${suffix}`;
+    });
   code.forEach((html, index) => { text = text.replace(`LOCALGPTINLINECODE${index}TOKEN`, html); });
   math.forEach((html, index) => { text = text.replace(`LOCALGPTINLINEMATH${index}TOKEN`, html); });
+  links.forEach((html, index) => { text = text.replace(`LOCALGPTLINK${index}TOKEN`, html); });
   return text;
 }
 
@@ -322,8 +342,10 @@ function formatElapsed(milliseconds) {
 
 function activityHint() {
   const quietFor = Date.now() - (state.lastActivityAt || Date.now());
+  const connectionAlive = state.lastHeartbeatAt && Date.now() - state.lastHeartbeatAt < 25000;
   if (quietFor < 5000) return "刚刚收到新进展";
   if (quietFor < 15000) return `${Math.floor(quietFor / 1000)} 秒前收到进展`;
+  if (connectionAlive) return `连接正常，Codex 已继续处理 ${Math.floor(quietFor / 1000)} 秒`;
   if (quietFor < 45000) return `Codex 仍在运行，${Math.floor(quietFor / 1000)} 秒没有新事件`;
   return `较长时间没有新事件，可继续等待或点击停止`;
 }
@@ -537,6 +559,7 @@ async function selectChat(id, { closeMobile = true } = {}) {
   state.progress = state.running ? [{ stage: "reconnect", label: "正在等待后台任务完成", detail: "页面会自动同步最终回答", status: "running" }] : [];
   state.runStartedAt = state.running ? Date.now() : null;
   state.lastActivityAt = state.running ? Date.now() : null;
+  state.lastHeartbeatAt = state.running ? Date.now() : null;
   state.streamError = "";
   await refreshFiles();
   renderAll(true);
@@ -616,6 +639,7 @@ async function stopGeneration() {
   if (!state.current || !state.running) return;
   state.activity = "正在停止…";
   state.lastActivityAt = Date.now();
+  state.lastHeartbeatAt = Date.now();
   renderMessages(true);
   try {
     await api(`/api/chats/${encodeURIComponent(state.current.id)}/stop`, { method: "POST" });
@@ -693,6 +717,9 @@ async function sendMessage() {
           state.lastActivityAt = Date.now();
         } else if (event.type === "usage") {
           state.usage = event.usage;
+        } else if (event.type === "heartbeat") {
+          state.lastHeartbeatAt = Date.now();
+          state.activity = event.text || "连接正常，Codex 仍在处理";
         } else if (event.type === "error") {
           state.streamError = event.error;
         } else if (event.type === "stopped") {
@@ -729,11 +756,13 @@ async function sendMessage() {
       state.progress = [{ stage: "reconnect", label: "正在后台同步", detail: "完成后会自动显示最终回答", status: "warning" }];
       state.runStartedAt = Date.now();
       state.lastActivityAt = Date.now();
+      state.lastHeartbeatAt = Date.now();
       startBackgroundPoll(state.current.id);
     } else {
       state.activity = "";
       state.runStartedAt = null;
       state.lastActivityAt = null;
+      state.lastHeartbeatAt = null;
       stopBackgroundPoll();
     }
     await refreshFiles().catch(() => {});

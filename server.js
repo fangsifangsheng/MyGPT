@@ -27,8 +27,11 @@ const CODEX_JS = process.platform === "win32"
 const CODEX_COMMAND = process.platform === "win32" && fsSync.existsSync(CODEX_JS) ? process.execPath : "codex";
 const CODEX_PREFIX_ARGS = [
   ...(process.platform === "win32" && CODEX_COMMAND === process.execPath ? [CODEX_JS] : []),
+  "--search",
   "-c",
   "sandbox_workspace_write.network_access=true",
+  "-c",
+  "shell_environment_policy.inherit=all",
   "-c",
   "web_search=\"live\"",
 ];
@@ -79,9 +82,9 @@ When the user asks for code, include the complete requested code in fenced code 
 Prefer answering in chat. Do not create or modify files unless the user explicitly asks for file changes or file creation.
 Uploaded files in the workspace may be read when relevant. Summarize findings and results in the final answer.
 Use concise progress updates during longer work, then give the full result. Respond in the user's language.
-For questions that depend on current information (prices, weather, news, exchange rates, live service status, or today's data), use the built-in live web search first and cite the source time or URL in the final answer. Do not claim that an interface is unavailable before trying live web search.
+For questions that depend on current information (prices, weather, news, exchange rates, live service status, or today's data), you MUST use the built-in live web search before any shell command or direct HTTP request. Do not use PowerShell, curl, or Node.js to query websites or APIs first. If the web search tool explicitly fails or is unavailable, immediately run Node.js 24's built-in global fetch as the fallback. In the same PowerShell command that launches Node, explicitly set NODE_USE_ENV_PROXY=1 and set HTTP_PROXY, HTTPS_PROXY, and ALL_PROXY from PROXY_URL (or http://127.0.0.1:10809 when PROXY_URL is empty) before invoking node. Do not import or require undici, ProxyAgent, proxy-agent, or any third-party package. Do not use PowerShell for HTTP unless both built-in web search and the proxy-enabled built-in Node.js fetch have failed. Do not stop at "web search is unavailable" and do not claim that current information cannot be retrieved until the proxy-backed Node.js fallback has been attempted. Cite the source time or URL in the final answer.
 On Windows, use the native PowerShell host directly. Do not wrap commands in cmd.exe /c or another powershell.exe -Command unless a .cmd/.bat file or CMD built-in genuinely requires it. Keep command syntax consistently PowerShell so quotes, pipes, dollar signs, and parentheses are parsed only once.
-When a shell command must make an HTTP(S) request, Windows PowerShell 5.1 must pass the proxy explicitly, for example: Invoke-RestMethod -Uri $url -Proxy $env:PROXY_URL. Do not rely on HTTP_PROXY environment-variable autodetection in Windows PowerShell. If PowerShell or curl fails with a TLS/Schannel error, stop retrying that client and use live web search or a Node.js fetch request instead.
+When a shell command must make an HTTP(S) request, prefer Node.js 24's built-in global fetch because it inherits the configured proxy. Do not use Get-Date -AsUTC because Windows PowerShell 5.1 does not support it; use [DateTime]::UtcNow instead. If PowerShell is used only after the preferred options failed, pass the proxy explicitly, for example: Invoke-RestMethod -Uri $url -Proxy $env:PROXY_URL. Do not rely on HTTP_PROXY environment-variable autodetection in Windows PowerShell. If PowerShell or curl fails with a TLS/Schannel error, stop retrying that client and use Node.js global fetch instead.
 Use standard Markdown tables without blank lines between table rows. Write math with LaTeX delimiters \\( ... \\) for inline formulas and \\[ ... \\] for display formulas so MyGPT can render it cleanly.`;
 const codexAppServer = new CodexAppServer({
   command: CODEX_COMMAND,
@@ -539,6 +542,25 @@ function runProgress(run, stage, label, detail = "", status = "running") {
   });
 }
 
+function startRunHeartbeat(run) {
+  run.heartbeatTimer = setInterval(() => {
+    const quietForMs = Date.now() - run.lastActivityAt;
+    if (quietForMs < 8000) return;
+    ndjson(run.res, {
+      type: "heartbeat",
+      quietForMs,
+      text: "连接正常，Codex 仍在处理",
+      at: new Date().toISOString(),
+    });
+  }, 10000);
+  run.heartbeatTimer.unref?.();
+}
+
+function stopRunHeartbeat(run) {
+  if (run?.heartbeatTimer) clearInterval(run.heartbeatTimer);
+  if (run) run.heartbeatTimer = null;
+}
+
 function runForEvent(params = {}) {
   for (const run of activeRuns.values()) {
     if (run.threadId && params.threadId === run.threadId && (!run.turnId || !params.turnId || params.turnId === run.turnId)) return run;
@@ -570,6 +592,7 @@ function syncFinalText(run) {
 async function finishRun(run, status, turnError = null, durationMs = null) {
   if (run.finishPromise) return run.finishPromise;
   run.finishPromise = (async () => {
+    stopRunHeartbeat(run);
     activeRuns.delete(run.key);
     const finalText = finalTextForRun(run) || run.sentText.trim();
     if (finalText) {
@@ -660,7 +683,7 @@ codexAppServer.on("notification", (event) => {
     } else if (item.type === "commandExecution") {
       const ok = item.exitCode === 0 || item.status === "completed";
       const detail = ok
-        ? "命令已完成，Codex 正在继续整理回答"
+        ? "命令结果已返回，连接正常，Codex 正在继续分析"
         : `命令已结束${item.exitCode !== null ? `，退出码 ${item.exitCode}` : ""}，Codex 正在处理结果`;
       runProgress(run, "tool", detail, item.command, ok ? "completed" : "warning");
     } else if (item.type === "fileChange") {
@@ -702,6 +725,7 @@ codexAppServer.on("notification", (event) => {
 });
 
 codexAppServer.on("exit", (error) => {
+  console.error(`Codex app-server 连接中断: ${error.message}`);
   for (const run of activeRuns.values()) finishRun(run, "failed", error.message);
 });
 
@@ -714,7 +738,10 @@ async function openCodexThread(run) {
     approvalPolicy: "never",
     sandbox: "workspace-write",
     developerInstructions: CHAT_DEVELOPER_INSTRUCTIONS,
-    config: { model_reasoning_effort: normalizeEffort(run.meta.reasoningEffort) },
+    config: {
+      model_reasoning_effort: normalizeEffort(run.meta.reasoningEffort),
+      web_search: "live",
+    },
   };
   let result;
   if (run.meta.codexThreadId) {
@@ -777,9 +804,11 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
       stopping: false,
       startedAt: Date.now(),
       lastActivityAt: Date.now(),
+      heartbeatTimer: null,
       finishPromise: null,
     };
     activeRuns.set(key, run);
+    startRunHeartbeat(run);
     runProgress(run, "connecting", "正在连接本地 Codex");
 
     await openCodexThread(run);
@@ -798,7 +827,11 @@ app.post("/api/chats/:id/messages", async (req, res, next) => {
       await codexAppServer.request("turn/interrupt", { threadId: run.threadId, turnId: run.turnId });
     }
   } catch (error) {
-    if (meta) activeRuns.delete(runKey(meta.userRole, meta.id));
+    if (meta) {
+      const failedRun = activeRuns.get(runKey(meta.userRole, meta.id));
+      stopRunHeartbeat(failedRun);
+      activeRuns.delete(runKey(meta.userRole, meta.id));
+    }
     if (res.headersSent) {
       ndjson(res, { type: "error", error: error.message });
       ndjson(res, { type: "done", status: "failed" });
