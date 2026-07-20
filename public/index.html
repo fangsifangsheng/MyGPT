@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#f7f7f8" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -13,7 +13,7 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/GPT%20logo-180.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="stylesheet" href="/vendor/katex/katex.min.css?v=0.18.1" />
-    <link rel="stylesheet" href="/styles.css?v=0.3.2" />
+    <link rel="stylesheet" href="/styles.css?v=0.4.3" />
   </head>
   <body>
     <div id="app" class="app-shell">
@@ -80,6 +80,9 @@
           </div>
           <div id="messages" class="messages" aria-live="polite"></div>
         </section>
+        <button id="scrollToBottomButton" class="scroll-to-bottom" type="button" hidden aria-label="回到最新消息" title="回到最新消息">
+          <svg viewBox="0 0 24 24"><path d="M12 5v14M6.5 13.5 12 19l5.5-5.5"/></svg>
+        </button>
 
         <div class="composer-region">
           <div id="pendingFiles" class="pending-files"></div>
@@ -90,7 +93,7 @@
                 <button id="attachButton" class="round-button" type="button" aria-label="上传文件" title="上传文件">
                   <svg viewBox="0 0 24 24"><path d="m20.5 11.5-8.2 8.2a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.6l-9.1 9.1a2 2 0 0 1-2.8-2.8l8.4-8.4"/></svg>
                 </button>
-                <button id="effortButton" class="effort-button" type="button">
+                <button id="effortButton" class="effort-button" type="button" aria-haspopup="menu" aria-expanded="false">
                   <svg viewBox="0 0 24 24"><path d="M9 18h6M10 22h4"/><path d="M8.4 14.5A7 7 0 1 1 15.6 14.5c-.9.7-1.3 1.4-1.4 2.5H9.8c-.1-1.1-.5-1.8-1.4-2.5Z"/></svg>
                   <span id="effortLabel">标准</span>
                 </button>
@@ -150,6 +153,6 @@
 
     <div id="toastRegion" class="toast-region" aria-live="assertive"></div>
     <script src="/vendor/katex/katex.min.js?v=0.18.1"></script>
-    <script type="module" src="/app.js?v=0.3.2"></script>
+    <script type="module" src="/app.js?v=0.4.3"></script>
   </body>
 </html>

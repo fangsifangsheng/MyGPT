@@ -12,6 +12,7 @@ const elements = {
   conversation: $("#conversation"),
   empty: $("#emptyState"),
   messages: $("#messages"),
+  scrollToBottom: $("#scrollToBottomButton"),
   form: $("#composerForm"),
   input: $("#messageInput"),
   send: $("#sendButton"),
@@ -68,6 +69,7 @@ const state = {
   draftEffort: "medium",
   draftSearchMode: "off",
   collapsedChatMonths: new Set(),
+  followOutput: true,
   booted: false,
 };
 
@@ -102,6 +104,44 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[char]);
+}
+
+async function copyText(text) {
+  const value = String(text ?? "");
+  if (navigator.clipboard?.writeText && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(value);
+      return;
+    } catch {}
+  }
+
+  const activeElement = document.activeElement;
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.readOnly = true;
+  textarea.setAttribute("aria-hidden", "true");
+  Object.assign(textarea.style, {
+    position: "fixed",
+    inset: "0 auto auto 0",
+    width: "1px",
+    height: "1px",
+    padding: "0",
+    border: "0",
+    opacity: "0",
+    pointerEvents: "none",
+  });
+  document.body.append(textarea);
+  textarea.focus({ preventScroll: true });
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  activeElement?.focus?.({ preventScroll: true });
+  if (!copied) throw new Error("浏览器未允许复制");
+}
+
+function copyCodeButton() {
+  return `<button class="copy-code" type="button" title="复制代码" aria-label="复制代码">${icon("copy")}<span>复制</span></button>`;
 }
 
 function renderMath(value, displayMode = false) {
@@ -225,7 +265,7 @@ function renderMarkdown(value) {
     const fence = line.match(/^```\s*([\w.+-]*)\s*$/);
     if (fence) {
       if (code) {
-        output.push(`<div class="code-block"><div class="code-header"><span>${escapeHtml(language || "code")}</span><button class="copy-code" type="button">复制</button></div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
+        output.push(`<div class="code-block"><div class="code-header"><span>${escapeHtml(language || "code")}</span>${copyCodeButton()}</div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
         code = null;
         language = "";
       } else {
@@ -305,7 +345,7 @@ function renderMarkdown(value) {
     }
   }
   if (code) {
-    output.push(`<div class="code-block"><div class="code-header"><span>${escapeHtml(language || "code")}</span><button class="copy-code" type="button">复制</button></div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
+    output.push(`<div class="code-block"><div class="code-header"><span>${escapeHtml(language || "code")}</span>${copyCodeButton()}</div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
   }
   closeList();
   return output.join("");
@@ -314,6 +354,7 @@ function renderMarkdown(value) {
 function icon(name) {
   const paths = {
     copy: '<path d="M9 9h10v10H9z"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
+    check: '<path d="m5 12 4 4L19 6"/>',
     file: '<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h5"/>',
     download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
     trash: '<path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/>',
@@ -445,7 +486,30 @@ function renderChats() {
   }).join("");
 }
 
+const BOTTOM_THRESHOLD = 72;
+
+function isConversationAtBottom() {
+  const { scrollHeight, scrollTop, clientHeight } = elements.conversation;
+  return scrollHeight - scrollTop - clientHeight <= BOTTOM_THRESHOLD;
+}
+
+function updateScrollToBottomButton() {
+  const hasContent = Boolean((state.current?.messages || []).length || state.streamingText || state.running);
+  elements.scrollToBottom.hidden = !hasContent || isConversationAtBottom();
+}
+
+function scrollConversationToBottom({ smooth = false } = {}) {
+  state.followOutput = true;
+  elements.conversation.scrollTo({
+    top: elements.conversation.scrollHeight,
+    behavior: smooth ? "smooth" : "auto",
+  });
+  elements.scrollToBottom.hidden = true;
+}
+
 function renderMessages(scroll = false) {
+  const shouldFollow = scroll || state.followOutput || isConversationAtBottom();
+  if (scroll) state.followOutput = true;
   const messages = state.current?.messages || [];
   elements.empty.hidden = messages.length > 0 || state.running || Boolean(state.streamingText) || Boolean(state.streamError);
   const html = messages.map((item, index) => {
@@ -462,7 +526,10 @@ function renderMessages(scroll = false) {
   const activity = state.running ? `<article class="message-row assistant run-row"><div class="message-inner"><div class="message-avatar run-avatar"><span class="thinking-dot"></span></div><div class="message-body run-status"><div class="run-status-head"><strong>${escapeHtml(state.activity || "Codex 正在处理")}</strong><span class="run-elapsed">${formatElapsed(Date.now() - (state.runStartedAt || Date.now()))}</span></div><div class="run-status-hint">${escapeHtml(activityHint())}</div>${progressRows ? `<div class="progress-timeline">${progressRows}</div>` : ""}</div></div></article>` : "";
   const error = state.streamError ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">!</div><div class="message-body error-message">${escapeHtml(state.streamError)}</div></div></article>` : "";
   elements.messages.innerHTML = html + streaming + activity + error;
-  if (scroll) requestAnimationFrame(() => { elements.conversation.scrollTop = elements.conversation.scrollHeight; });
+  requestAnimationFrame(() => {
+    if (shouldFollow) scrollConversationToBottom();
+    else updateScrollToBottomButton();
+  });
 }
 
 function renderHeader() {
@@ -488,6 +555,7 @@ function renderModelMenu() {
 
 function renderEffortMenu() {
   $$("#effortMenu [data-effort]").forEach((button) => button.classList.toggle("active", button.dataset.effort === currentEffort()));
+  elements.effortButton.setAttribute("aria-expanded", String(!elements.effortMenu.hidden));
 }
 
 function renderFiles() {
@@ -549,7 +617,7 @@ function scheduleMessageRender() {
   if (streamRenderTimer) return;
   streamRenderTimer = setTimeout(() => {
     streamRenderTimer = null;
-    renderMessages(true);
+    renderMessages();
   }, 45);
 }
 
@@ -580,6 +648,7 @@ function closePopovers(except = null) {
   [elements.modelMenu, elements.effortMenu].forEach((menu) => {
     if (menu !== except) menu.hidden = true;
   });
+  elements.effortButton.setAttribute("aria-expanded", String(!elements.effortMenu.hidden));
 }
 
 function showLogin() {
@@ -614,7 +683,7 @@ function startBackgroundPoll(chatId) {
         stopBackgroundPoll();
         await loadChats();
         await refreshFiles();
-        renderAll(true);
+        renderAll();
       }
     } catch {}
   }, 2500);
@@ -647,15 +716,37 @@ async function selectChat(id, { closeMobile = true } = {}) {
   if (closeMobile) closeSidebar();
 }
 
+let createChatPromise = null;
 async function createChat() {
   if (state.running) throw new Error("请先停止当前回答，再新建对话");
-  const chat = await api("/api/chats", {
-    method: "POST",
-    body: JSON.stringify({ model: currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
-  });
-  await loadChats();
-  await selectChat(chat.id);
-  return state.current;
+  if (createChatPromise) return createChatPromise;
+
+  createChatPromise = (async () => {
+    elements.newChat.disabled = true;
+    elements.newChat.setAttribute("aria-busy", "true");
+    const latest = state.chats[0];
+    if (latest && latest.messageCount === 0 && !latest.running) {
+      if (state.current?.id !== latest.id) await selectChat(latest.id);
+      else closeSidebar();
+      return state.current;
+    }
+
+    const chat = await api("/api/chats", {
+      method: "POST",
+      body: JSON.stringify({ model: currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
+    });
+    await loadChats();
+    await selectChat(chat.id);
+    return state.current;
+  })();
+
+  try {
+    return await createChatPromise;
+  } finally {
+    createChatPromise = null;
+    elements.newChat.disabled = false;
+    elements.newChat.removeAttribute("aria-busy");
+  }
 }
 
 async function ensureChat() {
@@ -724,7 +815,7 @@ async function stopGeneration() {
   state.activity = "正在停止…";
   state.lastActivityAt = Date.now();
   state.lastHeartbeatAt = Date.now();
-  renderMessages(true);
+  renderMessages();
   try {
     await api(`/api/chats/${encodeURIComponent(state.current.id)}/stop`, { method: "POST" });
   } catch (error) {
@@ -850,7 +941,7 @@ async function sendMessage() {
       stopBackgroundPoll();
     }
     await refreshFiles().catch(() => {});
-    renderAll(true);
+    renderAll();
   }
 }
 
@@ -899,6 +990,11 @@ async function bootstrap() {
 }
 
 elements.input.addEventListener("input", resizeInput);
+elements.conversation.addEventListener("scroll", () => {
+  state.followOutput = isConversationAtBottom();
+  updateScrollToBottomButton();
+}, { passive: true });
+elements.scrollToBottom.addEventListener("click", () => scrollConversationToBottom({ smooth: true }));
 elements.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
@@ -955,6 +1051,7 @@ elements.effortButton.addEventListener("click", (event) => {
   const rect = elements.effortButton.getBoundingClientRect();
   elements.effortMenu.style.left = `${Math.max(10, rect.left)}px`;
   elements.effortMenu.hidden = !elements.effortMenu.hidden;
+  elements.effortButton.setAttribute("aria-expanded", String(!elements.effortMenu.hidden));
   closePopovers(elements.effortMenu.hidden ? null : elements.effortMenu);
 });
 elements.searchButton.addEventListener("click", () => {
@@ -996,21 +1093,38 @@ elements.fileList.addEventListener("click", (event) => {
 elements.messages.addEventListener("click", async (event) => {
   const codeButton = event.target.closest(".copy-code");
   if (codeButton) {
-    await navigator.clipboard.writeText(codeButton.closest(".code-block").querySelector("code").textContent);
-    codeButton.textContent = "已复制";
-    setTimeout(() => { codeButton.textContent = "复制"; }, 1200);
+    const code = codeButton.closest(".code-block")?.querySelector("code")?.textContent || "";
+    try {
+      await copyText(code);
+      codeButton.innerHTML = `${icon("check")}<span>已复制</span>`;
+      codeButton.setAttribute("aria-label", "代码已复制");
+      setTimeout(() => {
+        if (!codeButton.isConnected) return;
+        codeButton.innerHTML = `${icon("copy")}<span>复制</span>`;
+        codeButton.setAttribute("aria-label", "复制代码");
+      }, 1400);
+    } catch {
+      toast("复制失败，请长按选择代码", "error");
+    }
     return;
   }
   const messageButton = event.target.closest(".copy-message");
   if (messageButton) {
     const id = messageButton.closest("[data-message-id]")?.dataset.messageId;
     const item = state.current?.messages.find((message) => message.id === id);
-    if (item) { await navigator.clipboard.writeText(item.content); toast("回答已复制"); }
+    if (item) {
+      try {
+        await copyText(item.content);
+        toast("回答已复制");
+      } catch {
+        toast("复制失败，请长按选择内容", "error");
+      }
+    }
   }
 });
-elements.form.addEventListener("dragover", (event) => { event.preventDefault(); elements.form.style.borderColor = "#171717"; });
-elements.form.addEventListener("dragleave", () => { elements.form.style.borderColor = ""; });
-elements.form.addEventListener("drop", (event) => { event.preventDefault(); elements.form.style.borderColor = ""; uploadFiles(event.dataTransfer.files); });
+elements.form.addEventListener("dragover", (event) => { event.preventDefault(); elements.form.classList.add("drag-over"); });
+elements.form.addEventListener("dragleave", () => elements.form.classList.remove("drag-over"));
+elements.form.addEventListener("drop", (event) => { event.preventDefault(); elements.form.classList.remove("drag-over"); uploadFiles(event.dataTransfer.files); });
 elements.input.addEventListener("paste", (event) => { if (event.clipboardData?.files?.length) uploadFiles(event.clipboardData.files); });
 $$('.close-dialog').forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 document.addEventListener("click", (event) => {
@@ -1022,6 +1136,21 @@ document.addEventListener("keydown", (event) => {
     createChat().then(() => elements.input.focus()).catch((error) => toast(error.message, "error"));
   }
 });
+
+function syncVisualViewport() {
+  const viewport = window.visualViewport;
+  const layoutHeight = document.documentElement.clientHeight;
+  const keyboardOffset = viewport ? Math.max(0, layoutHeight - viewport.height - viewport.offsetTop) : 0;
+  document.documentElement.style.setProperty("--keyboard-offset", `${Math.round(keyboardOffset)}px`);
+}
+
+window.visualViewport?.addEventListener("resize", syncVisualViewport);
+window.visualViewport?.addEventListener("scroll", syncVisualViewport);
+window.addEventListener("orientationchange", syncVisualViewport);
+document.addEventListener("gesturestart", (event) => event.preventDefault(), { passive: false });
+document.addEventListener("touchmove", (event) => {
+  if (event.touches.length > 1) event.preventDefault();
+}, { passive: false });
 elements.loginForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   elements.loginError.textContent = "";
@@ -1036,6 +1165,7 @@ elements.loginForm.addEventListener("submit", async (event) => {
 });
 
 resizeInput();
+syncVisualViewport();
 bootstrap().catch((error) => {
   console.error(error);
   toast(error.message, "error");
