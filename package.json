@@ -16,6 +16,7 @@
   "dependencies": {
     "express": "^5.1.0",
     "katex": "^0.18.1",
+    "markdown-it": "^14.3.0",
     "multer": "^2.0.2"
   }
 }

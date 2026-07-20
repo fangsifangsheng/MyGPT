@@ -164,7 +164,7 @@ function renderMath(value, displayMode = false) {
   return `<${tag} class="${className} math-fallback">${escapeHtml(source)}</${tag}>`;
 }
 
-function inlineMarkdown(value) {
+function legacyInlineMarkdown(value) {
   const code = [];
   const math = [];
   const links = [];
@@ -249,7 +249,7 @@ function renderTable(headers, alignments, rows) {
   return `<div class="table-scroll" role="region" tabindex="0"><table><thead><tr>${head}</tr></thead>${body ? `<tbody>${body}</tbody>` : ""}</table></div>`;
 }
 
-function renderMarkdown(value) {
+function legacyRenderMarkdown(value) {
   const lines = String(value ?? "").replace(/\r\n/g, "\n").split("\n");
   const output = [];
   let code = null;
@@ -349,6 +349,83 @@ function renderMarkdown(value) {
   }
   closeList();
   return output.join("");
+}
+
+const markdownRenderer = typeof window.markdownit === "function"
+  ? window.markdownit({ html: false, linkify: true, typographer: false, breaks: false })
+  : null;
+
+function renderMarkdownCodeBlock(tokens, index) {
+  const token = tokens[index];
+  const language = String(token.info || "").trim().split(/\s+/, 1)[0] || "code";
+  const code = String(token.content || "").replace(/\n$/, "");
+  return `<div class="code-block"><div class="code-header"><span>${escapeHtml(language)}</span>${copyCodeButton()}</div><pre><code>${escapeHtml(code)}</code></pre></div>`;
+}
+
+if (markdownRenderer) {
+  markdownRenderer.renderer.rules.fence = renderMarkdownCodeBlock;
+  markdownRenderer.renderer.rules.code_block = renderMarkdownCodeBlock;
+  markdownRenderer.renderer.rules.table_open = () => '<div class="table-scroll" role="region" tabindex="0"><table>';
+  markdownRenderer.renderer.rules.table_close = () => "</table></div>";
+  markdownRenderer.renderer.rules.link_open = (tokens, index, options, env, self) => {
+    tokens[index].attrSet("target", "_blank");
+    tokens[index].attrSet("rel", "noreferrer noopener");
+    return self.renderToken(tokens, index, options);
+  };
+  const defaultImageRule = markdownRenderer.renderer.rules.image;
+  markdownRenderer.renderer.rules.image = (tokens, index, options, env, self) => {
+    tokens[index].attrSet("loading", "lazy");
+    tokens[index].attrSet("referrerpolicy", "no-referrer");
+    return defaultImageRule(tokens, index, options, env, self);
+  };
+}
+
+function extractMarkdownMath(value, includeDisplay) {
+  let source = String(value ?? "");
+  const protectedCode = [];
+  source = source.replace(/(```|~~~)[\s\S]*?(?:\1|$)|`[^`\n]*`/g, (segment) => {
+    const marker = `LOCALGPTCODE${protectedCode.length}PLACEHOLDER`;
+    protectedCode.push(segment);
+    return marker;
+  });
+
+  const math = [];
+  const saveMath = (content, display) => {
+    const marker = `LOCALGPTMATH${math.length}PLACEHOLDER`;
+    math.push({ marker, content, display });
+    return marker;
+  };
+  if (includeDisplay) {
+    source = source.replace(/\\\[([\s\S]*?)\\\]/g, (_, content) => saveMath(content, true));
+    source = source.replace(/\$\$([\s\S]*?)\$\$/g, (_, content) => saveMath(content, true));
+  }
+  source = source.replace(/\\\(([\s\S]*?)\\\)/g, (_, content) => saveMath(content, false));
+  protectedCode.forEach((segment, index) => {
+    source = source.split(`LOCALGPTCODE${index}PLACEHOLDER`).join(segment);
+  });
+  return { source, math };
+}
+
+function restoreMarkdownMath(html, math) {
+  let output = html;
+  math.forEach(({ marker, content, display }) => {
+    const rendered = renderMath(content, display);
+    if (display) output = output.split(`<p>${marker}</p>`).join(rendered);
+    output = output.split(marker).join(rendered);
+  });
+  return output;
+}
+
+function inlineMarkdown(value) {
+  if (!markdownRenderer) return legacyInlineMarkdown(value);
+  const { source, math } = extractMarkdownMath(value, false);
+  return restoreMarkdownMath(markdownRenderer.renderInline(source), math);
+}
+
+function renderMarkdown(value) {
+  if (!markdownRenderer) return legacyRenderMarkdown(value);
+  const { source, math } = extractMarkdownMath(value, true);
+  return restoreMarkdownMath(markdownRenderer.render(source), math);
 }
 
 function icon(name) {
@@ -1005,8 +1082,12 @@ elements.form.addEventListener("submit", (event) => {
   event.preventDefault();
   state.running ? stopGeneration() : sendMessage();
 });
+function focusComposerOnDesktop() {
+  if (!window.matchMedia("(max-width: 760px)").matches) elements.input.focus();
+}
+
 elements.newChat.addEventListener("click", async () => {
-  try { await createChat(); elements.input.focus(); } catch (error) { toast(error.message, "error"); }
+  try { await createChat(); focusComposerOnDesktop(); } catch (error) { toast(error.message, "error"); }
 });
 elements.brand.addEventListener("click", () => {
   if (state.running) { toast("请先停止当前回答，再离开当前对话", "error"); return; }
@@ -1133,7 +1214,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("keydown", (event) => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
-    createChat().then(() => elements.input.focus()).catch((error) => toast(error.message, "error"));
+    createChat().then(focusComposerOnDesktop).catch((error) => toast(error.message, "error"));
   }
 });
 
