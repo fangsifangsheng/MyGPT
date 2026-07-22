@@ -139,8 +139,14 @@ svg {
 .chat-month-heading svg { width: 13px; height: 13px; flex: 0 0 13px; transition: transform .16s ease; }
 .chat-month-heading[aria-expanded="true"] svg { transform: rotate(90deg); }
 
-.chat-item {
+.chat-item-shell {
   position: relative;
+  min-height: 38px;
+  width: 100%;
+  margin-bottom: 2px;
+  border-radius: 8px;
+}
+.chat-item {
   display: flex;
   align-items: center;
   min-height: 38px;
@@ -150,15 +156,16 @@ svg {
   border-radius: 8px;
   cursor: pointer;
   padding: 0 9px;
-  margin-bottom: 2px;
   text-align: left;
+  touch-action: manipulation;
 }
 
 .chat-item.active { background: #e7e7e9; }
+.chat-item-shell.active .chat-item { background: #e7e7e9; }
 .chat-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 24px; }
 .chat-item-running { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-left: auto; animation: pulse 1.2s infinite; }
-.chat-item-menu { position: absolute; right: 6px; opacity: 0; width: 26px; height: 26px; border-radius: 6px; border: 0; background: inherit; color: var(--faint); display: grid; place-items: center; cursor: pointer; transition: color .15s ease; }
-.chat-item:hover .chat-item-menu, .chat-item.active .chat-item-menu { opacity: 1; }
+.chat-item-menu { position: absolute; top: 50%; right: 6px; z-index: 1; width: 26px; height: 26px; transform: translateY(-50%); opacity: 0; border-radius: 6px; border: 0; background: inherit; color: var(--faint); display: grid; place-items: center; cursor: pointer; transition: color .15s ease; }
+.chat-item-shell.active .chat-item-menu { opacity: 1; }
 .chat-item-menu:hover { color: var(--muted); }
 .chat-item-menu svg { width: 17px; }
 
@@ -233,7 +240,7 @@ svg {
 .math-display { width: 100%; margin: 16px 0; padding: 4px 0; overflow-x: auto; overflow-y: hidden; text-align: center; -webkit-overflow-scrolling: touch; }
 .math-display .katex-display { margin: 0; }
 .math-fallback { font-family: Cambria Math, STIX Two Math, serif; }
-.table-scroll { width: 100%; margin: 14px 0 18px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; -webkit-overflow-scrolling: touch; touch-action: pan-x; }
+.table-scroll { width: 100%; margin: 14px 0 18px; overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line); border-radius: 8px; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; overscroll-behavior-x: contain; overscroll-behavior-y: auto; }
 .message-content table { width: 100%; min-width: 340px; border-collapse: collapse; border-spacing: 0; font-size: 14px; line-height: 1.5; }
 .message-content th, .message-content td { padding: 9px 12px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
 .message-content th:last-child, .message-content td:last-child { border-right: 0; }
@@ -372,6 +379,10 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
 .toast.error { background: #9e3030; }
 .sidebar-backdrop { display: none; }
 
+@media (hover: hover) and (pointer: fine) {
+  .chat-item-shell:hover .chat-item-menu { opacity: 1; }
+}
+
 @keyframes pulse { 0%,100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1); } }
 @keyframes cursor-blink { 0%, 48% { opacity: 1; } 49%, 100% { opacity: 0; } }
 @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
@@ -385,6 +396,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: 2px s
   .topbar { height: calc(var(--topbar-height) + env(safe-area-inset-top)); flex-basis: calc(var(--topbar-height) + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0; border-bottom: 1px solid rgba(0,0,0,.04); }
   .model-button { font-size: 15px; max-width: calc(100vw - 185px); }
   .model-button span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-item-shell:not(.active) .chat-item-menu { opacity: 0; pointer-events: none; }
+  .chat-item-shell.active .chat-item-menu { opacity: 1; pointer-events: auto; }
   .desktop-label { display: none; }
   .topbar-button { padding: 0 5px; gap: 3px; }
   .conversation { padding-bottom: 152px; }

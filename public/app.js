@@ -55,16 +55,7 @@ const state = {
   chats: [],
   current: null,
   files: [],
-  running: false,
-  activity: "",
-  streamingText: "",
-  progress: [],
-  runStartedAt: null,
-  lastActivityAt: null,
-  lastHeartbeatAt: null,
-  runStatus: "idle",
-  usage: null,
-  streamError: "",
+  runtimes: new Map(),
   draftModel: "",
   draftEffort: "medium",
   draftSearchMode: "off",
@@ -72,6 +63,59 @@ const state = {
   followOutput: true,
   booted: false,
 };
+
+function createRuntime(id) {
+  const runtime = {
+    id,
+    running: false,
+    activity: "",
+    streamingText: "",
+    progress: [],
+    runStartedAt: null,
+    lastActivityAt: null,
+    lastHeartbeatAt: null,
+    runStatus: "idle",
+    usage: null,
+    streamError: "",
+    streamPromise: null,
+  };
+  state.runtimes.set(id, runtime);
+  return runtime;
+}
+
+function runtimeFor(id = state.current?.id) {
+  if (!id) return null;
+  return state.runtimes.get(id) || createRuntime(id);
+}
+
+function currentRuntime() {
+  return runtimeFor(state.current?.id);
+}
+
+function hasRunningRuntime() {
+  return [...state.runtimes.values()].some((runtime) => runtime.running);
+}
+
+function setChatRunning(id, running) {
+  const chat = state.chats.find((item) => item.id === id);
+  if (chat) chat.running = Boolean(running);
+  const runtime = runtimeFor(id);
+  if (runtime) runtime.running = Boolean(running);
+}
+
+function resetRuntime(runtime, { keepError = false } = {}) {
+  if (!runtime) return;
+  runtime.running = false;
+  runtime.activity = "";
+  runtime.streamingText = "";
+  runtime.progress = [];
+  runtime.runStartedAt = null;
+  runtime.lastActivityAt = null;
+  runtime.lastHeartbeatAt = null;
+  runtime.runStatus = "idle";
+  runtime.usage = null;
+  if (!keepError) runtime.streamError = "";
+}
 
 async function api(url, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -104,6 +148,31 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[char]);
+}
+
+function collapseRepeatedAssistantTail(value) {
+  let lines = String(value || "").replace(/\r\n?/g, "\n").trim().split("\n");
+  let collapsed = true;
+  while (collapsed && lines.length >= 8) {
+    collapsed = false;
+    for (let secondStart = Math.ceil(lines.length / 2); secondStart < lines.length; secondStart += 1) {
+      const blockLength = lines.length - secondStart;
+      for (let gap = 0; gap <= 2; gap += 1) {
+        const firstEnd = secondStart - gap;
+        const firstStart = firstEnd - blockLength;
+        if (firstStart < 0) continue;
+        if (gap && lines.slice(firstEnd, secondStart).some((line) => line.trim())) continue;
+        const first = lines.slice(firstStart, firstEnd).join("\n").trim();
+        const second = lines.slice(secondStart).join("\n").trim();
+        if (first.length < 500 || first !== second) continue;
+        lines = lines.slice(0, secondStart);
+        collapsed = true;
+        break;
+      }
+      if (collapsed) break;
+    }
+  }
+  return lines.join("\n").trim();
 }
 
 async function copyText(text) {
@@ -519,9 +588,9 @@ function chatsByMonth(chats) {
   return [...groups.values()];
 }
 
-function activityHint() {
-  const quietFor = Date.now() - (state.lastActivityAt || Date.now());
-  const connectionAlive = state.lastHeartbeatAt && Date.now() - state.lastHeartbeatAt < 25000;
+function activityHint(runtime = currentRuntime()) {
+  const quietFor = Date.now() - (runtime?.lastActivityAt || Date.now());
+  const connectionAlive = runtime?.lastHeartbeatAt && Date.now() - runtime.lastHeartbeatAt < 25000;
   if (quietFor < 5000) return "刚刚收到新进展";
   if (quietFor < 15000) return `${Math.floor(quietFor / 1000)} 秒前收到进展`;
   if (connectionAlive) return `连接正常，Codex 已继续处理 ${Math.floor(quietFor / 1000)} 秒`;
@@ -553,14 +622,21 @@ function renderChats() {
       ? `<div class="chat-month-heading latest"><span class="chat-month-line"></span><span class="chat-month-label">${escapeHtml(group.label)}</span><span class="chat-month-line"></span></div>`
       : `<button class="chat-month-heading" type="button" data-chat-month="${escapeHtml(group.key)}" aria-expanded="${String(!collapsed)}"><span class="chat-month-line"></span><span class="chat-month-label">${escapeHtml(group.label)}</span>${icon("chevron")}<span class="chat-month-line"></span></button>`;
     const chats = collapsed ? "" : group.chats.map((chat) => `
-      <div class="chat-item ${state.current?.id === chat.id ? "active" : ""}" data-chat-id="${escapeHtml(chat.id)}" role="button" tabindex="0">
-        <span class="chat-item-title">${escapeHtml(chat.title)}</span>
-        ${chat.running ? '<span class="chat-item-running"></span>' : ""}
+      <div class="chat-item-shell ${state.current?.id === chat.id ? "active" : ""}">
+        <button class="chat-item" type="button" data-chat-id="${escapeHtml(chat.id)}">
+          <span class="chat-item-title">${escapeHtml(chat.title)}</span>
+          ${(chat.running || runtimeFor(chat.id)?.running) ? '<span class="chat-item-running"></span>' : ""}
+        </button>
         <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话" aria-label="删除对话">${icon("trash")}</button>
       </div>
     `).join("");
     return heading + chats;
   }).join("");
+  $$("#chatList [data-chat-id]").forEach((item) => item.addEventListener("click", (event) => {
+    if (event.target.closest("[data-delete-chat]")) return;
+    event.stopPropagation();
+    selectChat(item.dataset.chatId).catch((error) => toast(error.message, "error"));
+  }));
 }
 
 const BOTTOM_THRESHOLD = 72;
@@ -571,7 +647,8 @@ function isConversationAtBottom() {
 }
 
 function updateScrollToBottomButton() {
-  const hasContent = Boolean((state.current?.messages || []).length || state.streamingText || state.running);
+  const runtime = currentRuntime();
+  const hasContent = Boolean((state.current?.messages || []).length || runtime?.streamingText || runtime?.running);
   elements.scrollToBottom.hidden = !hasContent || isConversationAtBottom();
 }
 
@@ -585,10 +662,11 @@ function scrollConversationToBottom({ smooth = false } = {}) {
 }
 
 function renderMessages(scroll = false) {
+  const runtime = currentRuntime();
   const shouldFollow = scroll || state.followOutput || isConversationAtBottom();
   if (scroll) state.followOutput = true;
   const messages = state.current?.messages || [];
-  elements.empty.hidden = messages.length > 0 || state.running || Boolean(state.streamingText) || Boolean(state.streamError);
+  elements.empty.hidden = messages.length > 0 || runtime?.running || Boolean(runtime?.streamingText) || Boolean(runtime?.streamError);
   const html = messages.map((item, index) => {
     if (item.role === "user") {
       return `<article class="message-row user" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><div class="message-body"><div class="message-content">${inlineMarkdown(item.content).replace(/\n/g, "<br>")}</div></div></div></article>`;
@@ -596,12 +674,12 @@ function renderMessages(scroll = false) {
     const durationMs = messageDurationMs(messages, index);
     const beijingDate = formatBeijingDate(item.createdAt);
     const meta = item.notice ? "" : `<div class="message-meta"><button class="message-action copy-message" type="button" title="复制回答">${icon("copy")}</button>${item.model ? `<span>${escapeHtml(item.model)}</span>` : ""}${durationMs !== null ? `<span class="message-duration">总计耗时：${formatMessageDuration(durationMs)}</span>` : ""}${beijingDate ? `<span class="message-date">日期:${escapeHtml(beijingDate)}</span>` : ""}</div>`;
-    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(item.content)}</div>${meta}</div></div></article>`;
+    return `<article class="message-row assistant" data-message-id="${escapeHtml(item.id)}"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(collapseRepeatedAssistantTail(item.content))}</div>${meta}</div></div></article>`;
   }).join("");
-  const streaming = state.streamingText ? `<article class="message-row assistant streaming-message"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(state.streamingText)}<span class="stream-cursor" aria-hidden="true"></span></div></div></div></article>` : "";
-  const progressRows = state.progress.slice(-4).map((item) => `<div class="progress-row ${escapeHtml(item.status || "running")}"><span class="progress-mark"></span><div><strong>${escapeHtml(item.label)}</strong>${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}</div></div>`).join("");
-  const activity = state.running ? `<article class="message-row assistant run-row"><div class="message-inner"><div class="message-avatar run-avatar"><span class="thinking-dot"></span></div><div class="message-body run-status"><div class="run-status-head"><strong>${escapeHtml(state.activity || "Codex 正在处理")}</strong><span class="run-elapsed">${formatElapsed(Date.now() - (state.runStartedAt || Date.now()))}</span></div><div class="run-status-hint">${escapeHtml(activityHint())}</div>${progressRows ? `<div class="progress-timeline">${progressRows}</div>` : ""}</div></div></article>` : "";
-  const error = state.streamError ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">!</div><div class="message-body error-message">${escapeHtml(state.streamError)}</div></div></article>` : "";
+  const streaming = runtime?.streamingText ? `<article class="message-row assistant streaming-message"><div class="message-inner"><img class="message-avatar logo-avatar" src="/GPT%20logo.png" alt="MyGPT" /><div class="message-body"><div class="message-content">${renderMarkdown(collapseRepeatedAssistantTail(runtime.streamingText))}<span class="stream-cursor" aria-hidden="true"></span></div></div></div></article>` : "";
+  const progressRows = (runtime?.progress || []).slice(-4).map((item) => `<div class="progress-row ${escapeHtml(item.status || "running")}"><span class="progress-mark"></span><div><strong>${escapeHtml(item.label)}</strong>${item.detail ? `<small>${escapeHtml(item.detail)}</small>` : ""}</div></div>`).join("");
+  const activity = runtime?.running ? `<article class="message-row assistant run-row"><div class="message-inner"><div class="message-avatar run-avatar"><span class="thinking-dot"></span></div><div class="message-body run-status"><div class="run-status-head"><strong>${escapeHtml(runtime.activity || "Codex 正在处理")}</strong><span class="run-elapsed">${formatElapsed(Date.now() - (runtime.runStartedAt || Date.now()))}</span></div><div class="run-status-hint">${escapeHtml(activityHint(runtime))}</div>${progressRows ? `<div class="progress-timeline">${progressRows}</div>` : ""}</div></div></article>` : "";
+  const error = runtime?.streamError ? `<article class="message-row assistant"><div class="message-inner"><div class="message-avatar">!</div><div class="message-body error-message">${escapeHtml(runtime.streamError)}</div></div></article>` : "";
   elements.messages.innerHTML = html + streaming + activity + error;
   requestAnimationFrame(() => {
     if (shouldFollow) scrollConversationToBottom();
@@ -610,6 +688,7 @@ function renderMessages(scroll = false) {
 }
 
 function renderHeader() {
+  const runtime = currentRuntime();
   const searchEnabled = currentSearchMode() === "on";
   elements.modelName.textContent = currentModel();
   elements.effortLabel.textContent = effortNames[currentEffort()] || currentEffort();
@@ -619,7 +698,7 @@ function renderHeader() {
   elements.fileCount.textContent = String(state.files.length);
   elements.filesButton.disabled = !state.current;
   elements.rename.disabled = !state.current;
-  elements.send.classList.toggle("running", state.running);
+  elements.send.classList.toggle("running", Boolean(runtime?.running));
   updateSendButton();
 }
 
@@ -679,8 +758,9 @@ function renderAll(scroll = false) {
 }
 
 function updateSendButton() {
-  elements.send.disabled = !state.running && !elements.input.value.trim();
-  elements.send.title = state.running ? "停止生成" : "发送";
+  const running = Boolean(currentRuntime()?.running);
+  elements.send.disabled = !running && !elements.input.value.trim();
+  elements.send.title = running ? "停止生成" : "发送";
 }
 
 function resizeInput() {
@@ -695,27 +775,29 @@ function scheduleMessageRender() {
   streamRenderTimer = setTimeout(() => {
     streamRenderTimer = null;
     renderMessages();
+    renderChats();
   }, 45);
 }
 
-function addProgress(event) {
-  state.activity = event.label || "Codex 正在处理";
-  state.lastActivityAt = Date.now();
-  const previous = state.progress.at(-1);
+function addProgress(runtime, event) {
+  runtime.activity = event.label || "Codex 正在处理";
+  runtime.lastActivityAt = Date.now();
+  const previous = runtime.progress.at(-1);
   if (previous && previous.stage === event.stage && previous.label === event.label) {
     Object.assign(previous, event);
   } else {
-    state.progress.push(event);
-    if (state.progress.length > 20) state.progress.shift();
+    runtime.progress.push(event);
+    if (runtime.progress.length > 20) runtime.progress.shift();
   }
 }
 
 setInterval(() => {
-  if (!state.running) return;
+  const runtime = currentRuntime();
+  if (!runtime?.running) return;
   const elapsed = document.querySelector(".run-elapsed");
   const hint = document.querySelector(".run-status-hint");
-  if (elapsed) elapsed.textContent = formatElapsed(Date.now() - (state.runStartedAt || Date.now()));
-  if (hint) hint.textContent = activityHint();
+  if (elapsed) elapsed.textContent = formatElapsed(Date.now() - (runtime.runStartedAt || Date.now()));
+  if (hint) hint.textContent = activityHint(runtime);
 }, 1000);
 
 function openSidebar() { document.body.classList.add("sidebar-open"); }
@@ -735,35 +817,43 @@ function showLogin() {
 
 async function loadChats() {
   state.chats = await api("/api/chats");
+  for (const chat of state.chats) {
+    const runtime = state.runtimes.get(chat.id);
+    if (runtime) runtime.running = Boolean(chat.running || runtime.streamPromise);
+  }
 }
 
-let backgroundPoll = null;
-function stopBackgroundPoll() {
-  if (backgroundPoll) clearInterval(backgroundPoll);
-  backgroundPoll = null;
+const backgroundPolls = new Map();
+let selectionSerial = 0;
+function stopBackgroundPoll(chatId) {
+  const timer = backgroundPolls.get(chatId);
+  if (timer) clearInterval(timer);
+  backgroundPolls.delete(chatId);
 }
 
 function startBackgroundPoll(chatId) {
-  stopBackgroundPoll();
-  backgroundPoll = setInterval(async () => {
-    if (!state.current || state.current.id !== chatId || !state.running) return stopBackgroundPoll();
+  if (backgroundPolls.has(chatId)) return;
+  const timer = setInterval(async () => {
+    const runtime = runtimeFor(chatId);
+    if (!runtime?.running) return stopBackgroundPoll(chatId);
     try {
       const latest = await api(`/api/chats/${encodeURIComponent(chatId)}`);
       if (!latest.running) {
-        state.current = latest;
-        state.running = false;
-        state.activity = "";
-        state.runStartedAt = null;
-        state.lastActivityAt = null;
-        state.progress = [];
-        state.streamingText = "";
-        stopBackgroundPoll();
+        const wasCurrent = state.current?.id === chatId;
+        runtime.streamPromise = null;
+        resetRuntime(runtime);
+        stopBackgroundPoll(chatId);
+        setChatRunning(chatId, false);
+        if (wasCurrent) state.current = latest;
         await loadChats();
-        await refreshFiles();
-        renderAll();
+        if (wasCurrent) {
+          await refreshFiles();
+          renderAll();
+        } else renderChats();
       }
     } catch {}
   }, 2500);
+  backgroundPolls.set(chatId, timer);
 }
 
 async function refreshFiles() {
@@ -777,25 +867,31 @@ async function refreshFiles() {
 }
 
 async function selectChat(id, { closeMobile = true } = {}) {
-  state.current = await api(`/api/chats/${encodeURIComponent(id)}`);
-  state.running = Boolean(state.current.running);
-  state.activity = state.running ? "任务正在后台运行…" : "";
-  state.streamingText = "";
-  state.progress = state.running ? [{ stage: "reconnect", label: "正在等待后台任务完成", detail: "页面会自动同步最终回答", status: "running" }] : [];
-  state.runStartedAt = state.running ? Date.now() : null;
-  state.lastActivityAt = state.running ? Date.now() : null;
-  state.lastHeartbeatAt = state.running ? Date.now() : null;
-  state.streamError = "";
+  if (closeMobile) closeSidebar();
+  const selection = ++selectionSerial;
+  const chat = await api(`/api/chats/${encodeURIComponent(id)}`);
+  if (selection !== selectionSerial) return state.current;
+  const runtime = runtimeFor(id);
+  state.current = chat;
+  if (!runtime.streamPromise) {
+    runtime.running = Boolean(chat.running);
+    runtime.activity = runtime.running ? "任务正在后台运行…" : "";
+    runtime.streamingText = "";
+    runtime.progress = runtime.running ? [{ stage: "reconnect", label: "正在等待后台任务完成", detail: "页面会自动同步最终回答", status: "running" }] : [];
+    runtime.runStartedAt = runtime.running ? Date.now() : null;
+    runtime.lastActivityAt = runtime.running ? Date.now() : null;
+    runtime.lastHeartbeatAt = runtime.running ? Date.now() : null;
+    runtime.streamError = "";
+  }
+  setChatRunning(id, Boolean(runtime.running || chat.running));
   await refreshFiles();
   renderAll(true);
-  if (state.running) startBackgroundPoll(state.current.id);
-  else stopBackgroundPoll();
-  if (closeMobile) closeSidebar();
+  if (runtime.running && !runtime.streamPromise) startBackgroundPoll(id);
+  else if (!runtime.running) stopBackgroundPoll(id);
 }
 
 let createChatPromise = null;
 async function createChat() {
-  if (state.running) throw new Error("请先停止当前回答，再新建对话");
   if (createChatPromise) return createChatPromise;
 
   createChatPromise = (async () => {
@@ -832,20 +928,23 @@ async function ensureChat() {
 
 async function updateChat(values) {
   if (!state.current) return;
-  state.current = await api(`/api/chats/${encodeURIComponent(state.current.id)}`, { method: "PATCH", body: JSON.stringify(values) });
+  const chatId = state.current.id;
+  const updated = await api(`/api/chats/${encodeURIComponent(chatId)}`, { method: "PATCH", body: JSON.stringify(values) });
+  if (state.current?.id === chatId) state.current = updated;
   await loadChats();
-  renderAll();
+  if (state.current?.id === chatId) renderAll();
+  else renderChats();
 }
 
 async function chooseModel(model) {
-  if (state.running) throw new Error("请等待当前回答结束后再切换模型");
+  if (currentRuntime()?.running) throw new Error("请等待当前回答结束后再切换模型");
   if (String(model || "").trim() !== currentModel()) return;
   elements.modelMenu.hidden = true;
   renderAll();
 }
 
 async function chooseEffort(effort) {
-  if (state.running) throw new Error("请等待当前回答结束后再调整推理强度");
+  if (currentRuntime()?.running) throw new Error("请等待当前回答结束后再调整推理强度");
   if (!effortNames[effort]) return;
   if (state.current) await updateChat({ reasoningEffort: effort });
   else state.draftEffort = effort;
@@ -854,7 +953,7 @@ async function chooseEffort(effort) {
 }
 
 async function chooseSearchMode(mode) {
-  if (state.running) throw new Error("请等待当前回答结束后再调整联网搜索");
+  if (currentRuntime()?.running) throw new Error("请等待当前回答结束后再调整联网搜索");
   if (!searchModeNames[mode]) return;
   if (state.current) await updateChat({ webSearchMode: mode });
   else state.draftSearchMode = mode;
@@ -888,13 +987,15 @@ async function uploadFiles(fileList) {
 }
 
 async function stopGeneration() {
-  if (!state.current || !state.running) return;
-  state.activity = "正在停止…";
-  state.lastActivityAt = Date.now();
-  state.lastHeartbeatAt = Date.now();
+  const chatId = state.current?.id;
+  const runtime = currentRuntime();
+  if (!chatId || !runtime?.running) return;
+  runtime.activity = "正在停止…";
+  runtime.lastActivityAt = Date.now();
+  runtime.lastHeartbeatAt = Date.now();
   renderMessages();
   try {
-    await api(`/api/chats/${encodeURIComponent(state.current.id)}/stop`, { method: "POST" });
+    await api(`/api/chats/${encodeURIComponent(chatId)}/stop`, { method: "POST" });
   } catch (error) {
     toast(error.message, "error");
   }
@@ -902,124 +1003,145 @@ async function stopGeneration() {
 
 async function sendMessage() {
   const content = elements.input.value.trim();
-  if (!content || state.running) return;
+  if (!content || currentRuntime()?.running) return;
   const chat = await ensureChat();
-  state.running = true;
-  state.streamError = "";
-  state.activity = "正在连接 Codex…";
-  state.streamingText = "";
-  state.progress = [];
-  state.runStartedAt = Date.now();
-  state.lastActivityAt = Date.now();
-  state.runStatus = "running";
-  state.usage = null;
-  stopBackgroundPoll();
+  const chatId = chat.id;
+  const runtime = runtimeFor(chatId);
+  if (runtime.running) return;
+  runtime.running = true;
+  runtime.streamError = "";
+  runtime.activity = "正在连接 Codex…";
+  runtime.streamingText = "";
+  runtime.progress = [];
+  runtime.runStartedAt = Date.now();
+  runtime.lastActivityAt = Date.now();
+  runtime.lastHeartbeatAt = Date.now();
+  runtime.runStatus = "running";
+  runtime.usage = null;
+  stopBackgroundPoll(chatId);
+  setChatRunning(chatId, true);
   const optimistic = { id: `temp-${Date.now()}`, role: "user", content, createdAt: new Date().toISOString() };
-  state.current.messages.push(optimistic);
+  chat.messages.push(optimistic);
   elements.input.value = "";
   resizeInput();
-  renderAll(true);
+  if (state.current?.id === chatId) renderAll(true);
 
-  try {
-    const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, model: currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
-    });
-    if (response.status === 401) { showLogin(); throw new Error("需要访问密码"); }
-    if (!response.ok || !response.body) {
-      let error = `发送失败（${response.status}）`;
-      try { error = (await response.json()).error || error; } catch {}
-      throw new Error(error);
-    }
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+  const streamPromise = (async () => {
     let persistedUser = false;
-    while (true) {
-      const { value, done } = await reader.read();
-      buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        let event;
-        try { event = JSON.parse(line); } catch { continue; }
-        if (event.type === "user.saved") {
-          const index = state.current.messages.findIndex((item) => item.id === optimistic.id);
-          if (index >= 0) state.current.messages[index] = event.message;
-          persistedUser = true;
-          if (event.chat?.title) state.current.title = event.chat.title;
-        } else if (event.type === "progress") {
-          addProgress(event);
-        } else if (event.type === "activity") {
-          state.activity = event.text;
-          state.lastActivityAt = Date.now();
-        } else if (event.type === "assistant.delta") {
-          state.streamingText += event.delta || "";
-          state.activity = "正在生成回答";
-          state.lastActivityAt = Date.now();
-        } else if (event.type === "assistant.replace") {
-          state.streamingText = event.text || "";
-          state.activity = "正在生成回答";
-          state.lastActivityAt = Date.now();
-        } else if (event.type === "assistant.message") {
-          if (!state.current.messages.some((item) => item.id === event.message.id)) state.current.messages.push(event.message);
-          state.streamingText = "";
-          state.lastActivityAt = Date.now();
-        } else if (event.type === "usage") {
-          state.usage = event.usage;
-        } else if (event.type === "heartbeat") {
-          state.lastHeartbeatAt = Date.now();
-          state.activity = event.text || "连接正常，Codex 仍在处理";
-        } else if (event.type === "error") {
-          state.streamError = event.error;
-        } else if (event.type === "stopped") {
-          state.activity = event.partial ? "已停止，已保留生成内容" : "已停止";
-          state.runStatus = "interrupted";
-        } else if (event.type === "done") {
-          state.runStatus = event.status || "completed";
-        }
-        scheduleMessageRender();
+    try {
+      const response = await fetch(`/api/chats/${encodeURIComponent(chat.id)}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, model: currentModel(), reasoningEffort: currentEffort(), webSearchMode: currentSearchMode() }),
+      });
+      if (response.status === 401) { showLogin(); throw new Error("需要访问密码"); }
+      if (!response.ok || !response.body) {
+        let error = `发送失败（${response.status}）`;
+        try { error = (await response.json()).error || error; } catch {}
+        throw new Error(error);
       }
-      if (done) break;
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let event;
+          try { event = JSON.parse(line); } catch { continue; }
+          if (event.type === "user.saved") {
+            const target = state.current?.id === chatId ? state.current : chat;
+            const index = target.messages.findIndex((item) => item.id === optimistic.id);
+            if (index >= 0) target.messages[index] = event.message;
+            persistedUser = true;
+            if (event.chat?.title) target.title = event.chat.title;
+          } else if (event.type === "progress") {
+            addProgress(runtime, event);
+          } else if (event.type === "activity") {
+            runtime.activity = event.text;
+            runtime.lastActivityAt = Date.now();
+          } else if (event.type === "assistant.delta") {
+            runtime.streamingText += event.delta || "";
+            runtime.activity = "正在生成回答";
+            runtime.lastActivityAt = Date.now();
+          } else if (event.type === "assistant.replace") {
+            runtime.streamingText = event.text || "";
+            runtime.activity = "正在生成回答";
+            runtime.lastActivityAt = Date.now();
+          } else if (event.type === "assistant.message") {
+            const target = state.current?.id === chatId ? state.current : chat;
+            if (!target.messages.some((item) => item.id === event.message.id)) target.messages.push(event.message);
+            runtime.streamingText = "";
+            runtime.lastActivityAt = Date.now();
+          } else if (event.type === "usage") {
+            runtime.usage = event.usage;
+          } else if (event.type === "heartbeat") {
+            runtime.lastHeartbeatAt = Date.now();
+            runtime.activity = event.text || "连接正常，Codex 仍在处理";
+          } else if (event.type === "error") {
+            runtime.streamError = event.error;
+          } else if (event.type === "stopped") {
+            runtime.activity = event.partial ? "已停止，已保留生成内容" : "已停止";
+            runtime.runStatus = "interrupted";
+          } else if (event.type === "done") {
+            runtime.runStatus = event.status || "completed";
+          }
+          scheduleMessageRender();
+        }
+        if (done) break;
+      }
+      if (!persistedUser) {
+        const latest = await api(`/api/chats/${encodeURIComponent(chat.id)}`);
+        chat.messages = latest.messages;
+        chat.title = latest.title;
+      }
+    } catch (error) {
+      runtime.streamError = error.message;
+      const latest = await api(`/api/chats/${encodeURIComponent(chat.id)}`).catch(() => null);
+      if (latest) {
+        chat.messages = latest.messages;
+        chat.title = latest.title;
+        runtime.running = Boolean(latest.running);
+      }
+    } finally {
+      runtime.streamPromise = null;
+      runtime.streamingText = "";
+      await loadChats().catch(() => {});
+      const latest = await api(`/api/chats/${encodeURIComponent(chatId)}`).catch(() => null);
+      if (latest) {
+        chat.messages = latest.messages;
+        chat.title = latest.title;
+        runtime.running = Boolean(latest.running);
+      }
+      setChatRunning(chatId, runtime.running);
+      if (runtime.running) {
+        runtime.streamError = "";
+        runtime.activity = "实时连接已断开，后台任务仍在运行";
+        runtime.progress = [{ stage: "reconnect", label: "正在后台同步", detail: "完成后会自动显示最终回答", status: "warning" }];
+        runtime.runStartedAt = Date.now();
+        runtime.lastActivityAt = Date.now();
+        runtime.lastHeartbeatAt = Date.now();
+        startBackgroundPoll(chatId);
+      } else {
+        runtime.activity = "";
+        runtime.runStartedAt = null;
+        runtime.lastActivityAt = null;
+        runtime.lastHeartbeatAt = null;
+        runtime.progress = [];
+        stopBackgroundPoll(chatId);
+      }
+      if (state.current?.id === chatId) {
+        state.current = chat;
+        await refreshFiles().catch(() => {});
+        renderAll();
+      } else renderChats();
     }
-    if (!persistedUser) {
-      const latest = await api(`/api/chats/${encodeURIComponent(chat.id)}`);
-      state.current = latest;
-    }
-  } catch (error) {
-    state.streamError = error.message;
-    const latest = await api(`/api/chats/${encodeURIComponent(chat.id)}`).catch(() => null);
-    if (latest) state.current = latest;
-  } finally {
-    state.running = false;
-    state.progress = [];
-    state.streamingText = "";
-    await loadChats().catch(() => {});
-    const latest = state.current ? await api(`/api/chats/${encodeURIComponent(state.current.id)}`).catch(() => null) : null;
-    if (latest) {
-      state.current = latest;
-      state.running = Boolean(latest.running);
-    }
-    if (state.running) {
-      state.streamError = "";
-      state.activity = "实时连接已断开，后台任务仍在运行";
-      state.progress = [{ stage: "reconnect", label: "正在后台同步", detail: "完成后会自动显示最终回答", status: "warning" }];
-      state.runStartedAt = Date.now();
-      state.lastActivityAt = Date.now();
-      state.lastHeartbeatAt = Date.now();
-      startBackgroundPoll(state.current.id);
-    } else {
-      state.activity = "";
-      state.runStartedAt = null;
-      state.lastActivityAt = null;
-      state.lastHeartbeatAt = null;
-      stopBackgroundPoll();
-    }
-    await refreshFiles().catch(() => {});
-    renderAll();
-  }
+  })();
+  runtime.streamPromise = streamPromise;
+  await streamPromise;
 }
 
 async function deleteFile(relative) {
@@ -1038,8 +1160,9 @@ async function deleteChat(id) {
     if (state.current?.id === id) {
       state.current = null;
       state.files = [];
-      state.running = false;
     }
+    state.runtimes.delete(id);
+    stopBackgroundPoll(id);
     await loadChats();
     if (!state.current && state.chats.length) await selectChat(state.chats[0].id, { closeMobile: false });
     else renderAll();
@@ -1075,12 +1198,12 @@ elements.scrollToBottom.addEventListener("click", () => scrollConversationToBott
 elements.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
     event.preventDefault();
-    if (!elements.send.disabled) state.running ? stopGeneration() : sendMessage();
+    if (!elements.send.disabled) currentRuntime()?.running ? stopGeneration() : sendMessage();
   }
 });
 elements.form.addEventListener("submit", (event) => {
   event.preventDefault();
-  state.running ? stopGeneration() : sendMessage();
+  currentRuntime()?.running ? stopGeneration() : sendMessage();
 });
 function focusComposerOnDesktop() {
   if (!window.matchMedia("(max-width: 760px)").matches) elements.input.focus();
@@ -1090,8 +1213,8 @@ elements.newChat.addEventListener("click", async () => {
   try { await createChat(); focusComposerOnDesktop(); } catch (error) { toast(error.message, "error"); }
 });
 elements.brand.addEventListener("click", () => {
-  if (state.running) { toast("请先停止当前回答，再离开当前对话", "error"); return; }
-  state.current = null; state.files = []; state.running = false; renderAll(); closeSidebar();
+  selectionSerial += 1;
+  state.current = null; state.files = []; renderAll(); closeSidebar();
 });
 elements.menu.addEventListener("click", openSidebar);
 elements.closeSidebar.addEventListener("click", closeSidebar);
@@ -1104,13 +1227,16 @@ elements.filesButton.addEventListener("click", async () => { await refreshFiles(
 elements.settingsButton.addEventListener("click", () => { renderSettings(); elements.settingsDialog.showModal(); closeSidebar(); });
 document.addEventListener("click", async (event) => {
   if (!event.target.closest("#switchRoleButton")) return;
-  if (state.running) { toast("请先停止当前回答，再切换登录用户名", "error"); return; }
+  if (hasRunningRuntime()) { toast("请先停止所有正在进行的回答，再切换登录用户名", "error"); return; }
   try {
     await fetch("/api/auth/logout", { method: "POST" });
     elements.settingsDialog.close();
+    selectionSerial += 1;
     state.current = null;
     state.chats = [];
     state.files = [];
+    state.runtimes.clear();
+    for (const chatId of backgroundPolls.keys()) stopBackgroundPoll(chatId);
     renderAll();
     await bootstrap();
   } catch (error) { toast(error.message, "error"); }
@@ -1160,10 +1286,6 @@ elements.chatList.addEventListener("click", (event) => {
   if (deleteButton) { event.stopPropagation(); deleteChat(deleteButton.dataset.deleteChat); return; }
   const item = event.target.closest("[data-chat-id]");
   if (item) {
-    if (state.running && state.current?.id !== item.dataset.chatId) {
-      toast("请先停止当前回答，再切换对话", "error");
-      return;
-    }
     selectChat(item.dataset.chatId).catch((error) => toast(error.message, "error"));
   }
 });
@@ -1195,7 +1317,7 @@ elements.messages.addEventListener("click", async (event) => {
     const item = state.current?.messages.find((message) => message.id === id);
     if (item) {
       try {
-        await copyText(item.content);
+        await copyText(collapseRepeatedAssistantTail(item.content));
         toast("回答已复制");
       } catch {
         toast("复制失败，请长按选择内容", "error");

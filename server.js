@@ -235,6 +235,37 @@ function metaPath(id, role) {
   return path.join(chatDir(id, role), ".localgpt", "chat.json");
 }
 
+function collapseRepeatedAssistantTail(value) {
+  let lines = String(value || "").replace(/\r\n?/g, "\n").trim().split("\n");
+  let collapsed = true;
+  while (collapsed && lines.length >= 8) {
+    collapsed = false;
+    for (let secondStart = Math.ceil(lines.length / 2); secondStart < lines.length; secondStart += 1) {
+      const blockLength = lines.length - secondStart;
+      for (let gap = 0; gap <= 2; gap += 1) {
+        const firstEnd = secondStart - gap;
+        const firstStart = firstEnd - blockLength;
+        if (firstStart < 0) continue;
+        if (gap && lines.slice(firstEnd, secondStart).some((line) => line.trim())) continue;
+        const first = lines.slice(firstStart, firstEnd).join("\n").trim();
+        const second = lines.slice(secondStart).join("\n").trim();
+        if (first.length < 500 || first !== second) continue;
+        lines = lines.slice(0, secondStart);
+        collapsed = true;
+        break;
+      }
+      if (collapsed) break;
+    }
+  }
+  return lines.join("\n").trim();
+}
+
+function responseMessages(messages = []) {
+  return messages.map((item) => item.role === "assistant"
+    ? { ...item, content: collapseRepeatedAssistantTail(item.content) }
+    : item);
+}
+
 async function readMeta(id, role) {
   const meta = JSON.parse(await fs.readFile(metaPath(id, role), "utf8"));
   meta.model = MODEL_ID;
@@ -359,7 +390,7 @@ app.get("/api/chats/:id", async (req, res, next) => {
   try {
     const userRole = requestRole(req);
     const meta = await readMeta(req.params.id, userRole);
-    res.json({ ...meta, running: activeRuns.has(runKey(userRole, meta.id)) });
+    res.json({ ...meta, messages: responseMessages(meta.messages), running: activeRuns.has(runKey(userRole, meta.id)) });
   } catch (error) { next(error); }
 });
 
@@ -373,7 +404,7 @@ app.patch("/api/chats/:id", async (req, res, next) => {
     if (req.body.webSearchMode !== undefined) meta.webSearchMode = normalizeWebSearchMode(req.body.webSearchMode);
     if (req.body.resetThread === true && !activeRuns.has(runKey(userRole, meta.id))) meta.codexThreadId = null;
     await writeMeta(meta);
-    res.json(meta);
+    res.json({ ...meta, messages: responseMessages(meta.messages) });
   } catch (error) { next(error); }
 });
 
@@ -575,12 +606,21 @@ function runForEvent(params = {}) {
 }
 
 function finalTextForRun(run) {
-  return [...run.agentItems.values()]
-    .filter((item) => item.phase === "final_answer" || item.phase === null)
-    .map((item) => item.text)
-    .filter(Boolean)
+  const items = [...run.agentItems.values()];
+  const explicitFinalItems = items.filter((item) => item.phase === "final_answer" && item.text?.trim());
+  const candidates = explicitFinalItems.length
+    ? explicitFinalItems
+    : items.filter((item) => item.phase === null && item.text?.trim()).slice(-1);
+  const seen = new Set();
+  return collapseRepeatedAssistantTail(candidates
+    .map((item) => item.text.trim())
+    .filter((text) => {
+      if (seen.has(text)) return false;
+      seen.add(text);
+      return true;
+    })
     .join("\n")
-    .trim();
+    .trim());
 }
 
 function syncFinalText(run) {
