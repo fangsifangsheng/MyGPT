@@ -60,6 +60,7 @@ const state = {
   draftEffort: "medium",
   draftSearchMode: "off",
   collapsedChatMonths: new Set(),
+  pendingDeleteChatId: null,
   followOutput: true,
   booted: false,
 };
@@ -621,15 +622,22 @@ function renderChats() {
     const heading = latest
       ? `<div class="chat-month-heading latest"><span class="chat-month-line"></span><span class="chat-month-label">${escapeHtml(group.label)}</span><span class="chat-month-line"></span></div>`
       : `<button class="chat-month-heading" type="button" data-chat-month="${escapeHtml(group.key)}" aria-expanded="${String(!collapsed)}"><span class="chat-month-line"></span><span class="chat-month-label">${escapeHtml(group.label)}</span>${icon("chevron")}<span class="chat-month-line"></span></button>`;
-    const chats = collapsed ? "" : group.chats.map((chat) => `
-      <div class="chat-item-shell ${state.current?.id === chat.id ? "active" : ""}">
+    const chats = collapsed ? "" : group.chats.map((chat) => {
+      const deleteOpen = state.pendingDeleteChatId === chat.id;
+      return `
+      <div class="chat-item-shell ${state.current?.id === chat.id ? "active" : ""} ${deleteOpen ? "delete-open" : ""}">
         <button class="chat-item" type="button" data-chat-id="${escapeHtml(chat.id)}">
           <span class="chat-item-title">${escapeHtml(chat.title)}</span>
           ${(chat.running || runtimeFor(chat.id)?.running) ? '<span class="chat-item-running"></span>' : ""}
         </button>
-        <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话" aria-label="删除对话">${icon("trash")}</button>
+        <button class="chat-item-menu" type="button" data-delete-chat="${escapeHtml(chat.id)}" title="删除对话" aria-label="删除对话" aria-haspopup="menu" aria-expanded="${String(deleteOpen)}">${icon("trash")}</button>
+        ${deleteOpen ? `<div class="chat-delete-menu" role="menu" aria-label="删除对话">
+          <button class="chat-delete-confirm" type="button" role="menuitem" data-confirm-delete="${escapeHtml(chat.id)}">删除</button>
+          <button type="button" role="menuitem" data-cancel-delete>取消</button>
+        </div>` : ""}
       </div>
-    `).join("");
+    `;
+    }).join("");
     return heading + chats;
   }).join("");
   $$("#chatList [data-chat-id]").forEach((item) => item.addEventListener("click", (event) => {
@@ -867,6 +875,7 @@ async function refreshFiles() {
 }
 
 async function selectChat(id, { closeMobile = true } = {}) {
+  state.pendingDeleteChatId = null;
   if (closeMobile) closeSidebar();
   const selection = ++selectionSerial;
   const chat = await api(`/api/chats/${encodeURIComponent(id)}`);
@@ -1154,7 +1163,9 @@ async function deleteFile(relative) {
 
 async function deleteChat(id) {
   const chat = state.chats.find((item) => item.id === id);
-  if (!chat || !confirm(`删除对话“${chat.title}”及其中的全部文件？此操作无法撤销。`)) return;
+  if (!chat) return;
+  state.pendingDeleteChatId = null;
+  renderChats();
   try {
     await api(`/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (state.current?.id === id) {
@@ -1282,8 +1293,26 @@ elements.chatList.addEventListener("click", (event) => {
     renderChats();
     return;
   }
+  const confirmDeleteButton = event.target.closest("[data-confirm-delete]");
+  if (confirmDeleteButton) {
+    event.stopPropagation();
+    deleteChat(confirmDeleteButton.dataset.confirmDelete).catch((error) => toast(error.message, "error"));
+    return;
+  }
+  if (event.target.closest("[data-cancel-delete]")) {
+    event.stopPropagation();
+    state.pendingDeleteChatId = null;
+    renderChats();
+    return;
+  }
   const deleteButton = event.target.closest("[data-delete-chat]");
-  if (deleteButton) { event.stopPropagation(); deleteChat(deleteButton.dataset.deleteChat); return; }
+  if (deleteButton) {
+    event.stopPropagation();
+    state.pendingDeleteChatId = state.pendingDeleteChatId === deleteButton.dataset.deleteChat ? null : deleteButton.dataset.deleteChat;
+    renderChats();
+    if (state.pendingDeleteChatId) requestAnimationFrame(() => $("[data-confirm-delete]")?.focus());
+    return;
+  }
   const item = event.target.closest("[data-chat-id]");
   if (item) {
     selectChat(item.dataset.chatId).catch((error) => toast(error.message, "error"));
@@ -1332,8 +1361,17 @@ elements.input.addEventListener("paste", (event) => { if (event.clipboardData?.f
 $$('.close-dialog').forEach((button) => button.addEventListener("click", () => button.closest("dialog").close()));
 document.addEventListener("click", (event) => {
   if (!event.target.closest(".popover") && !event.target.closest("#modelButton") && !event.target.closest("#effortButton")) closePopovers();
+  if (state.pendingDeleteChatId && !event.target.closest(".chat-item-shell")) {
+    state.pendingDeleteChatId = null;
+    renderChats();
+  }
 });
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.pendingDeleteChatId) {
+    state.pendingDeleteChatId = null;
+    renderChats();
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     createChat().then(focusComposerOnDesktop).catch((error) => toast(error.message, "error"));

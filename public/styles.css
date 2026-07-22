@@ -127,6 +127,8 @@ svg {
 .chat-list {
   flex: 1;
   min-height: 0;
+  position: relative;
+  isolation: isolate;
   overflow-y: auto;
   scrollbar-width: thin;
 }
@@ -162,12 +164,17 @@ svg {
 
 .chat-item.active { background: #e7e7e9; }
 .chat-item-shell.active .chat-item { background: #e7e7e9; }
+.chat-item-shell.delete-open { z-index: 20; }
 .chat-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 24px; }
 .chat-item-running { width: 7px; height: 7px; border-radius: 50%; background: var(--green); margin-left: auto; animation: pulse 1.2s infinite; }
 .chat-item-menu { position: absolute; top: 50%; right: 6px; z-index: 1; width: 26px; height: 26px; transform: translateY(-50%); opacity: 0; border-radius: 6px; border: 0; background: inherit; color: var(--faint); display: grid; place-items: center; cursor: pointer; transition: color .15s ease; }
 .chat-item-shell.active .chat-item-menu { opacity: 1; }
 .chat-item-menu:hover { color: var(--muted); }
 .chat-item-menu svg { width: 17px; }
+.chat-delete-menu { position: absolute; top: 34px; right: 6px; z-index: 30; width: 92px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: #fff; box-shadow: 0 10px 28px rgba(0,0,0,.16); pointer-events: auto; }
+.chat-delete-menu button { width: 100%; min-height: 34px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; text-align: left; cursor: pointer; }
+.chat-delete-menu button:hover, .chat-delete-menu button:focus-visible { background: var(--surface); }
+.chat-delete-menu .chat-delete-confirm { color: var(--danger); }
 
 .sidebar-footer { border-top: 1px solid var(--line); padding-top: 7px; }
 .connection-card { display: flex; gap: 10px; align-items: center; padding: 9px 10px 5px; }
