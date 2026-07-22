@@ -38,6 +38,12 @@ const elements = {
   settingsButton: $("#settingsButton"),
   settingsDialog: $("#settingsDialog"),
   settingsContent: $("#settingsContent"),
+  renameDialog: $("#renameDialog"),
+  renameForm: $("#renameForm"),
+  renameInput: $("#renameInput"),
+  renameError: $("#renameError"),
+  renameCancel: $("#renameCancelButton"),
+  renameSave: $("#renameSaveButton"),
   connectionText: $("#connectionText"),
   loginDialog: $("#loginDialog"),
   loginForm: $("#loginForm"),
@@ -1252,10 +1258,32 @@ document.addEventListener("click", async (event) => {
     await bootstrap();
   } catch (error) { toast(error.message, "error"); }
 });
-elements.rename.addEventListener("click", async () => {
+elements.rename.addEventListener("click", () => {
   if (!state.current) return;
-  const title = prompt("对话名称", state.current.title);
-  if (title?.trim()) await updateChat({ title: title.trim() });
+  elements.renameInput.value = state.current.title || "";
+  elements.renameError.textContent = "";
+  elements.renameDialog.showModal();
+  requestAnimationFrame(() => elements.renameInput.select());
+});
+elements.renameCancel.addEventListener("click", () => elements.renameDialog.close());
+elements.renameForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const title = elements.renameInput.value.trim();
+  if (!title) {
+    elements.renameError.textContent = "请输入对话名称";
+    elements.renameInput.focus();
+    return;
+  }
+  elements.renameError.textContent = "";
+  elements.renameSave.disabled = true;
+  try {
+    await updateChat({ title });
+    elements.renameDialog.close();
+  } catch (error) {
+    elements.renameError.textContent = error.message;
+  } finally {
+    elements.renameSave.disabled = false;
+  }
 });
 elements.modelButton.addEventListener("click", (event) => {
   event.stopPropagation();
